@@ -7,7 +7,6 @@ import cv2
 from phenotypy.data.make_dataset import Video
 from phenotypy.misc.dict_tools import *
 
-
 font = cv2.FONT_HERSHEY_SIMPLEX
 annot_pos = (10, 25)
 font_scale = 0.7
@@ -29,33 +28,55 @@ def main(video_path):
 
 
 def play_video(video_path):
+    """
+    Plays a video from file with annotations overlaid. Play/pause with 'p' and quit with 'q' (x button does not work).
+    :param video_path: path to video file to be played
+    """
 
     video_obj = Video(video_path)
     video_obj.encode_labels()
 
     video = video_obj.video
+    pause = int(video_obj.fps / 2.)
     labels = video_obj.frame_labels
     activities = reverse_dict(video_obj.activity_encoding)
     collection = video_obj.collection.name if video_obj.collection else 'no source'
     index = 0
 
+    def annotate_frame(frame, annot_text):
+        """
+        Helper function for displaying a frame and its annotation
+        :param frame: the frame as a numpy array
+        :param annot_text: a string to overlay on the frame
+        """
+        cv2.putText(frame, annot_text, annot_pos, font, font_scale, font_color, line_type)
+        cv2.imshow(f'{video_path.name} ({collection})', frame)
+
     while video.isOpened():
 
         ret, frame = video.read()
+        key = cv2.waitKey(1) & 0xff
 
-        if ret:
+        if not ret:
+            break
 
-            annot_text = activities[labels[index]]
-            index += 1
+        annot_text = activities[labels[index]]
+        index += 1
 
-            cv2.putText(frame, annot_text, annot_pos, font, font_scale, font_color, line_type)
-            cv2.imshow(f'{video_path.name} ({collection})', frame)
+        if cv2.waitKey(pause) & key == ord('p'):
 
-            # Press Q on keyboard to  exit
-            if cv2.waitKey(25) & 0xFF == ord('q'):
-                break
+            while True:
 
-        else:
+                key2 = cv2.waitKey(1) or 0xff
+                annotate_frame(frame, annot_text)
+
+                if key2 == ord('p'):
+                    break
+
+        annotate_frame(frame, annot_text)
+
+        # Press Q on keyboard to  exit
+        if cv2.waitKey(pause) & 0xFF == ord('q'):
             break
 
     video.release()

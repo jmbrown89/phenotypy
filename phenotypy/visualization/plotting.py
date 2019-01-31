@@ -2,6 +2,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 from pathlib import Path
+from phenotypy.misc.math import *
+
 
 sns.set_style('white')
 plt.rc("font", **{"sans-serif": ["Roboto"]})
@@ -64,3 +66,10 @@ class Plotter:
         plt.draw()
 
         self.savefig(f'activity_length_{unit}')
+
+
+def montage_frames(frame_list, title):
+
+    plt.imshow(np.hstack(frame_list))
+    plt.title(title)
+    plt.draw()

@@ -4,14 +4,15 @@ import logging
 from pathlib import Path
 from dotenv import find_dotenv, load_dotenv
 from collections import Counter
-import numpy as np
-import pandas as pd
+import tqdm
 
+import torch
 import torch.utils.data as data
-from phenotypy.visualization.plotting import Plotter
+import cv2
+from phenotypy.visualization.plotting import *
 from phenotypy.data.loading import load_video
+from phenotypy.data.sampling import SlidingWindowSampler
 from phenotypy.misc.dict_tools import *
-
 
 @click.command()
 @click.argument('input_filepath', type=click.Path(exists=True))
@@ -30,19 +31,19 @@ def main(input_filepath, output_filepath):
         csv_file = (video_path / collection).with_suffix('.csv')
         video_list = pd.read_csv(csv_file)['video'].apply(lambda x: video_path / x).values
 
-        plotter = Plotter(out_dir=output_filepath, formats=('.svg',), prefix=collection + '_')
         dataset = VideoCollection(video_list, output_filepath, name=collection)
 
-        dataset.statistics(plotter)
+        # This is example of a training loop, which appears to be working
+        for i, (inputs, targets) in tqdm.tqdm(enumerate(dataset), total=len(dataset)):
+            pass  # print(inputs.shape, targets.shape)
 
 
-class VideoCollection:
+class VideoCollection(data.Dataset):
 
     def __init__(self, video_list, processed_dir, name='all'):  # TODO pass in config file for describing the experiment
         """
         VideoCollection is a lightweight wrapper than loads multiple separate video files into Video objects.
-        This wrapper simply serves as a means to easily perform operations common to all videos in the collection,
-        such as train-test splitting, preprocessing, and calculation of summary statistics.
+        This wrapper serves to generate frame sequences from raw footage, without breaking them down into frames.
         :param video_list: a list of paths to video files to be loaded into Video objects
         """
         self.video_list = video_list
@@ -52,11 +53,16 @@ class VideoCollection:
         self.video_objects = []
         self.activity_set = set()
         self.activity_encoding = dict()
+        self.label_encoding = dict()
         self.annotations = []
 
         self._create_dataset()
 
     def _create_dataset(self):
+        """
+        Create video objects for each video in the collection, and create a global activity set and encoding. Once
+        created, the video annotations will be encoded accordingly.
+        """
 
         for video_path in self.video_list:
 
@@ -68,12 +74,44 @@ class VideoCollection:
             video.collection = self  # so each video knows which collection it belongs to
 
         # Generate numeric label encoding from the set of activities across all videos
-        self.activity_encoding = enumerate_dict(self.activity_set)
+        self.activity_encoding = enumerate_dict(tuple(sorted(list(self.activity_set))))
+        self.label_encoding = reverse_dict(self.activity_encoding)
 
         for video in self.video_objects:
             video.encode_labels(self.activity_encoding)
 
+        # Precompute batches with which to train
+        sampler = SlidingWindowSampler(self.video_objects, window=12, stride=12)  # this will need to be config.
+        self.batches = sampler.precompute_samples()
+
+    def __len__(self):
+        """
+        :return: number of videos in the collection
+        """
+        return len(self.batches)
+
+    def __getitem__(self, item):
+        """
+        TBD
+        :param item:
+        :return:
+        """
+        v_index, batch = self.batches[item]
+
+        inputs, targets = [], []
+        for idxs, labels in batch:
+
+            inputs.append(self.video_objects[v_index].get_frames(idxs))
+            targets.append(labels)
+
+        return torch.from_numpy(np.asarray(inputs).transpose(0, -1, 1, 2, 3)), torch.from_numpy(np.asarray(targets))
+
     def statistics(self, plotter):
+        """
+        Calculate statistics over the whole collection, such as number of videos, frequency of activities, and length of
+        time spent doing each activity.
+        :param plotter: plotting object with which to generate plots
+        """
 
         logging.info(f"Number of videos: {len(self.video_list)}")
         logging.info(f"Number of annotations (one or more frames): {len(self.annotations)}")
@@ -90,32 +128,45 @@ class VideoCollection:
         # for video in self.video_objects:
         #     video.statistics()
 
-    def cross_validate(self, folds=5):
 
-        pass
-
-
-class Video(data.Dataset):
+class Video:
 
     def __init__(self, video_path, data_source='MIT', plotter=None):
+        """
+        This class is wrapper around individual video clips, and serves to load frame sequences and associated
+         annotations for training.
+        :param video_path: the file path of the video to load
+        :param data_source: which dataset the video comes from (e.g. MIT)
+        :param plotter: an optional object which will do all the plotting associated with this video
+        """
 
         # Initialise class variables
         self.video_path = video_path
         self.data_source = data_source
         self.plotter = plotter
+
         self.raw_annotations = pd.DataFrame()
         self.activity_set = set()
-        self.activity_encoding = dict()
+        self.activity_encoding = dict() # str --> numeric
+        self.label_encoding = dict()  # numeric --> str
 
         self.collection = None
         self.frame_labels = None
+        self.one_hot_encoded = None
 
         # Load raw video and annotations
         logging.info(f"Loading video '{video_path}'")
-        self.video, self.fps = load_video(video_path)
+        self.video, self.fps, self.height, self.width, self.frames = load_video(video_path)
         self._load_annotations(video_path)
 
     def _load_annotations(self, input_video, annotator=1):
+        """
+        This function will load the annotations that correspond with a particular video. It's not very dataset-agnostic
+        at the moment, as it only works for the MIT dataset. Once the annotations are loaded, it will choose an encoding
+        (activity text --> numeric) which can be reset by the VideoCollections class.
+        :param input_video: file path for video
+        :param annotator: the MIT annotator number to use (1 or 2)
+        """
 
         annotation_folder = f'Annotator_group_{annotator}' if self.data_source == 'MIT' else None
         annot_path = Path.joinpath(input_video.parent, annotation_folder, input_video.with_suffix('.txt').name)
@@ -124,9 +175,9 @@ class Video(data.Dataset):
             assert(Path.is_file(annot_path))
         except AssertionError:
             logging.warning(f"Unable to locate annotation file for video '{input_video.name}'")
-            return None
+            exit(1)
 
-        logging.info(f"Loading annotations '{annot_path}'")
+        # logging.info(f"Loading annotations '{annot_path}'")
 
         with open(annot_path) as f:
             content = f.readlines()
@@ -135,19 +186,50 @@ class Video(data.Dataset):
         self.raw_annotations['seconds'] = self.raw_annotations['frames'] / self.fps
         self.activity_set = set(self.raw_annotations['activity'].unique())
         self.activity_encoding = enumerate_dict(self.activity_set)
+        self.label_encoding = reverse_dict(self.activity_encoding)
+
+    def get_frames(self, idxs):
+        """
+        This function will simply extract frames at the indices specified, in that order, and return them as a list.
+        This function does not return the corresponding annotations, as the indices are assumed to be provided in such a
+        way that the label would be the same for all frames.
+        :param idxs: indices of the video from which frames should be sampled
+        :return: sampled frames
+        """
+
+        frames = []
+        for idx in idxs:
+
+            self.video.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            res, frame = self.video.read()  # BGR!!!!
+
+            if not res:
+                return None  # TODO need to handle this better
+
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frames.append(frame)
+
+        return frames
 
     def encode_labels(self, encoding=None):
+        """
+        This function will convert the textual annotations (MIT format) into per-frame annotations, and subsequently
+        apply the encoding (activity text --> numeric --> one-hot) specified. If the video is part of a collection,
+        the specified encoding must match that of the collection to which it belongs.
+        :param encoding:
+        """
 
         if self.collection is None:
             logging.warning("Video is not part of a collection; activity labels may be incorrect")
         else:
-            logging.info(f"'{self.video_path.name}' using labels from collection '{self.collection.name}'")
+            # logging.info(f"'{self.video_path.name}' using labels from collection '{self.collection.name}'")
             if encoding != self.collection.activity_encoding:
                 logging.error(f"Video activity encoding does not match its collection object f'{self.collection.name}'")
                 exit(1)
 
         if encoding is not None:
             self.activity_encoding = encoding
+            self.label_encoding = reverse_dict(encoding)
 
         # Produce a dense list of annotations, frame-by-frame
         labels = np.zeros(shape=(self.raw_annotations.loc[len(self.raw_annotations) - 1]['end']), dtype=int)
@@ -158,14 +240,34 @@ class Video(data.Dataset):
             labels[row['start']:row['end']] = [label] * (row['end'] - row['start'])
 
         self.frame_labels = labels
+        self.one_hot_encoded = pd.get_dummies(self.frame_labels)  # this could still have missing columns
+
+        def missing_elements(L, start, end):
+            return sorted(set(range(start, end + 1)).difference(L))
+
+        for index in missing_elements(sorted(self.one_hot_encoded.columns), 0, len(self.label_encoding) - 1):
+            self.one_hot_encoded[index] = 0
+
+        # TODO add automated tests...
+        self.one_hot_encoded = self.one_hot_encoded[sorted(self.one_hot_encoded.columns)]
+        cols = [reverse_dict(self.activity_encoding)[i] for i in range(len(self.activity_encoding))]
+        self.one_hot_encoded.columns = cols
 
     def statistics(self):
+        """
+        Calculate video-specific statistics of the annotations.
+        """
 
         print(self.raw_annotations.groupby('activity')['frames'].describe())
         self.plotter.plot_activity_length(self.raw_annotations[self.raw_annotations['activity'] != 'rest'])
 
 
 def parse_mit_annotations(raw_annotations):
+    """
+    Convert and load the raw MIT activity annotations from text files into a structured DataFrame.
+    :param raw_annotations: the raw annotations from text files
+    :return: the parsed annotations
+    """
 
     stripped = [x.strip().split(': ')[1].split(' ') for x in raw_annotations]
     raw_data = pd.DataFrame(stripped, columns=['frame_window', 'activity'])
