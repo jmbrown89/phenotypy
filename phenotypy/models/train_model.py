@@ -5,7 +5,6 @@ from dotenv import find_dotenv, load_dotenv
 import yaml
 
 import torch
-from torch.autograd import Variable
 from torch import optim
 import torch.utils.data as data
 import torch.nn.functional as F

@@ -6,12 +6,12 @@ no_classes: 8
 
 # Model
 model: resnet10
-clip_length: 8  # how many frames per clip window
-clip_stride: 8  # how many frames to slide the window
+clip_length: 16  # how many frames per clip window
+clip_stride: 4  # how many frames to slide the window
 
 # Training
 epochs: 10
-batch_size: 4
+batch_size: 2
 
 # Optimizer
 lr: 0.01
