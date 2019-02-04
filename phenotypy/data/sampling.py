@@ -20,17 +20,16 @@ class Sampler(object):
 
 class SlidingWindowSampler(Sampler):
 
-    def __init__(self, video_objects, window=8, stride=1, batch_size=8):
+    def __init__(self, video_objects, window=8, stride=1):
 
         Sampler.__init__(self, video_objects)
         self.window = window
         self.stride = stride
-        self.batch_size = batch_size
-        self.attempts = batch_size * 2
+        self.attempts = 10
 
-    def precompute_samples(self):
+    def precompute_clips(self):
 
-        batches = []
+        clips = []
         for v_index, video in enumerate(self.video_objects):
 
             logging.info(f"Extracting batches from video '{video.video_path.stem}', which has {video.frames} frames")
@@ -38,8 +37,6 @@ class SlidingWindowSampler(Sampler):
 
             sample = True
             while sample:
-
-                batch = []
 
                 for i in range(0, self.attempts):
 
@@ -50,21 +47,11 @@ class SlidingWindowSampler(Sampler):
 
                     idxs, labels = sample
                     if len(labels) == 1:
-
-                        ohe = np.zeros(shape=(len(video.activity_encoding)))
-                        ohe[labels[0]] = 1
-                        batch.append((idxs, ohe))
+                        clips.append((v_index, idxs, labels[0]))
                     else:
                         continue
 
-                    if len(batch) == self.batch_size:
-                        break
-
-                batches.append((v_index, batch))
-
-            logging.info(f"Running batch count: {len(batches)} batches")
-
-        return batches
+        return clips
 
     def sample_frames(self, video):
 

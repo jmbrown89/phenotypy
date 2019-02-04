@@ -19,6 +19,7 @@ def load_video(video_file):
     width = int(video.get(cv2.CV_CAP_PROP_FRAME_WIDTH)) if int(major_ver) < 3 else int(video.get(cv2.CAP_PROP_FRAME_COUNT))
     height = int(video.get(cv2.CV_CAP_PROP_FRAME_HEIGHT)) if int(major_ver) < 3 else int(video.get(cv2.CAP_PROP_FRAME_COUNT))
     frames = int(video.get(cv2.CV_CAP_PROP_FRAME_COUNT)) if int(major_ver) < 3 else int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+    res, frame = video.read()  # BGR!!!!
+    channels = frame.shape[-1]
 
-    return video, fps, height, width, frames
-
+    return video, fps, channels, frames, height, width  #

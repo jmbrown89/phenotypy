@@ -4,15 +4,18 @@ import logging
 from pathlib import Path
 from dotenv import find_dotenv, load_dotenv
 from collections import Counter
-import tqdm
-
+import cv2
+import numpy as np
+import pandas as pd
 import torch
 import torch.utils.data as data
-import cv2
-from phenotypy.visualization.plotting import *
+
 from phenotypy.data.loading import load_video
 from phenotypy.data.sampling import SlidingWindowSampler
+from phenotypy.data.transforms import *
 from phenotypy.misc.dict_tools import *
+from phenotypy.visualization.plotting import *
+
 
 @click.command()
 @click.argument('input_filepath', type=click.Path(exists=True))
@@ -28,14 +31,20 @@ def main(input_filepath, output_filepath):
 
     for collection in ['training', 'validation', 'testing']:
 
-        csv_file = (video_path / collection).with_suffix('.csv')
-        video_list = pd.read_csv(csv_file)['video'].apply(lambda x: video_path / x).values
-
-        dataset = VideoCollection(video_list, output_filepath, name=collection)
+        csv_file = Path(collection).with_suffix('.csv')
+        data_loader = loader_from_csv(video_path, output_filepath, csv_file, name=collection)
 
         # This is example of a training loop, which appears to be working
-        for i, (inputs, targets) in tqdm.tqdm(enumerate(dataset), total=len(dataset)):
-            pass  # print(inputs.shape, targets.shape)
+        for i, (clip, target) in enumerate(data_loader):
+            montage_frames(clip, data_loader.label_encoding[target])
+
+
+def loader_from_csv(data_dir, save_dir, csv_file, name='training'):
+
+    video_list = pd.read_csv(data_dir / csv_file)['video'].apply(lambda x: data_dir / x).values
+    logging.info(f"Found {len(video_list)} videos in '{data_dir}'")
+    loader = VideoCollection(video_list, save_dir, name=name)
+    return loader
 
 
 class VideoCollection(data.Dataset):
@@ -74,37 +83,48 @@ class VideoCollection(data.Dataset):
             video.collection = self  # so each video knows which collection it belongs to
 
         # Generate numeric label encoding from the set of activities across all videos
+        # TODO - make this more flexible. Might want to only annotate certain behaviours
         self.activity_encoding = enumerate_dict(tuple(sorted(list(self.activity_set))))
         self.label_encoding = reverse_dict(self.activity_encoding)
+        self.no_classes = len(self.activity_encoding)
 
         for video in self.video_objects:
             video.encode_labels(self.activity_encoding)
 
         # Precompute batches with which to train
-        sampler = SlidingWindowSampler(self.video_objects, window=12, stride=12)  # this will need to be config.
-        self.batches = sampler.precompute_samples()
+        self.sampler = SlidingWindowSampler(self.video_objects, window=8, stride=12)  # TODO this will need to be config.
+        self.clips = self.sampler.precompute_clips()
+        self.height, self.width = self.video_objects[0].height, self.video_objects[0].width
 
     def __len__(self):
         """
         :return: number of videos in the collection
         """
-        return len(self.batches)
+        return len(self.clips)
 
     def __getitem__(self, item):
         """
-        TBD
-        :param item:
-        :return:
+        Returns a single clip, parametrised by this collection's sampler object.
+        :param item: index of the batch to be generated
+        :return: a 4-dimensional Torch tensor of sampled video frames (channels x frames x rows x cols)
         """
-        v_index, batch = self.batches[item]
 
-        inputs, targets = [], []
-        for idxs, labels in batch:
+        v_idx, f_idxs, label = self.clips[item]
+        clip = self.video_objects[v_idx].get_frames(f_idxs)
 
-            inputs.append(self.video_objects[v_index].get_frames(idxs))
-            targets.append(labels)
+        spatial_transform = Compose([  # TODO add to config file - make it a sub-dict
+            ToPIL(),
+            Scale((128, 128)),
+            RandomHorizontalFlip(),
+            ToTensor(),
+            Normalize([0, 0, 0], [1, 1, 1])
+        ])
 
-        return torch.from_numpy(np.asarray(inputs).transpose(0, -1, 1, 2, 3)), torch.from_numpy(np.asarray(targets))
+        spatial_transform.randomize_parameters()  # once per clip!
+        clip = [spatial_transform(img) for img in clip]
+        clip = torch.stack(clip, 0).permute(1, 0, 2, 3)
+
+        return clip, label
 
     def statistics(self, plotter):
         """
@@ -115,7 +135,7 @@ class VideoCollection(data.Dataset):
 
         logging.info(f"Number of videos: {len(self.video_list)}")
         logging.info(f"Number of annotations (one or more frames): {len(self.annotations)}")
-        logging.info(f"Number of unique activities: {len(self.activity_set)}")
+        logging.info(f"Number of unique activities: {self.no_classes}")
 
         label_counts = Counter(self.annotations)
         plotter.plot_activity_frequency(label_counts)
@@ -152,11 +172,10 @@ class Video:
 
         self.collection = None
         self.frame_labels = None
-        self.one_hot_encoded = None
 
         # Load raw video and annotations
         logging.info(f"Loading video '{video_path}'")
-        self.video, self.fps, self.height, self.width, self.frames = load_video(video_path)
+        self.video, self.fps, self.channels, self.frames, self.height, self.width = load_video(video_path)
         self._load_annotations(video_path)
 
     def _load_annotations(self, input_video, annotator=1):
@@ -206,7 +225,12 @@ class Video:
             if not res:
                 return None  # TODO need to handle this better
 
+            # TODO make this configurable
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frame = np.pad(frame, ((8, 8), (0, 0), (0, 0)), mode='symmetric')
+
+            crop = (frame.shape[1] - frame.shape[0]) // 2
+            frame = frame[:, crop:-crop, :]
             frames.append(frame)
 
         return frames
@@ -220,7 +244,7 @@ class Video:
         """
 
         if self.collection is None:
-            logging.warning("Video is not part of a collection; activity labels may be incorrect")
+            logging.error("Video must be part of a VideoCollection object in order to encode labels.")
         else:
             # logging.info(f"'{self.video_path.name}' using labels from collection '{self.collection.name}'")
             if encoding != self.collection.activity_encoding:
@@ -240,18 +264,6 @@ class Video:
             labels[row['start']:row['end']] = [label] * (row['end'] - row['start'])
 
         self.frame_labels = labels
-        self.one_hot_encoded = pd.get_dummies(self.frame_labels)  # this could still have missing columns
-
-        def missing_elements(L, start, end):
-            return sorted(set(range(start, end + 1)).difference(L))
-
-        for index in missing_elements(sorted(self.one_hot_encoded.columns), 0, len(self.label_encoding) - 1):
-            self.one_hot_encoded[index] = 0
-
-        # TODO add automated tests...
-        self.one_hot_encoded = self.one_hot_encoded[sorted(self.one_hot_encoded.columns)]
-        cols = [reverse_dict(self.activity_encoding)[i] for i in range(len(self.activity_encoding))]
-        self.one_hot_encoded.columns = cols
 
     def statistics(self):
         """

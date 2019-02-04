@@ -1,8 +1,14 @@
+import logging
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 from pathlib import Path
 from phenotypy.misc.math import *
+
+try:
+    import visdom
+except ImportError:
+    raise RuntimeError("No visdom package is found. Please install it with command: \n pip install visdom")
 
 
 sns.set_style('white')
@@ -10,15 +16,25 @@ plt.rc("font", **{"sans-serif": ["Roboto"]})
 pal = sns.color_palette("colorblind", 8)
 
 
+__all__ = ['Plotter', 'montage_frames']
+
+
 class Plotter:
 
-    def __init__(self, out_dir, prefix='', save=True, dpi=300, formats=('.svg',)):
+    def __init__(self, out_dir, prefix='', save=True, dpi=300, formats=('.svg',), vis=False):
 
         self.out_dir = Path(out_dir)
         self.prefix = prefix
         self.save = save
         self.dpi = dpi
         self.formats = formats
+        self.vis = None
+
+        if vis:
+            self.vis = visdom.Visdom()
+            self.loss_window = self.create_plot_window('# Iterations', 'Loss', 'Loss')
+            self.avg_loss_window = self.create_plot_window('# Iterations', 'Loss', 'Average loss')
+            self.avg_accuracy_window = self.create_plot_window('# Iterations', 'Accuracy', 'Average accuracy')
 
     def savefig(self, name):
 
@@ -26,6 +42,28 @@ class Plotter:
 
             out_file = self.out_dir / f'{self.prefix}{name}{fmt}'
             plt.savefig(out_file, dpi=self.dpi)
+
+    def create_plot_window(self, xlabel, ylabel, title):
+
+        return self.vis.line(X=np.array([1]), Y=np.array([np.nan]), opts=dict(xlabel=xlabel, ylabel=ylabel, title=title))
+
+    def plot_loss(self, engine):
+
+        try:
+            self.vis.line(X=np.array([engine.state.iteration]), Y=np.array([engine.state.output]),
+                          update='append', win=self.loss_window)
+        except AttributeError:
+            pass
+
+    def plot_loss_accuracy(self, engine, avg_accuracy, avg_loss):
+
+        try:
+            self.vis.line(X=np.array([engine.state.epoch]), Y=np.array([avg_accuracy]),
+                          win=self.avg_accuracy_window, update='append')
+            self.vis.line(X=np.array([engine.state.epoch]), Y=np.array([avg_loss]),
+                          win=self.avg_loss_window, update='append')
+        except AttributeError:
+            pass
 
     def plot_activity_frequency(self, count_object):
 
@@ -70,6 +108,11 @@ class Plotter:
 
 def montage_frames(frame_list, title):
 
-    plt.imshow(np.hstack(frame_list))
+    frame_array = np.asarray(frame_list)
+
+    if frame_array.shape[-1] != 3:
+        frame_array = frame_array.transpose((1, 2, 3, 0))
+
+    plt.imshow(np.hstack(frame_array))
     plt.title(title)
-    plt.draw()
+    plt.show()
