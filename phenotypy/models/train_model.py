@@ -2,7 +2,6 @@ import click
 import logging
 from pathlib import Path
 from dotenv import find_dotenv, load_dotenv
-import yaml
 
 import torch
 from torch import optim
@@ -11,7 +10,7 @@ import torch.nn.functional as F
 from ignite.engine import Events, create_supervised_trainer, create_supervised_evaluator
 from ignite.metrics import Accuracy, Loss
 
-from phenotypy.data.make_dataset import loader_from_csv
+from phenotypy.data.make_dataset import parse_config, create_data_loaders
 from phenotypy.models import resnet
 from phenotypy.visualization.plotting import Plotter
 
@@ -28,52 +27,11 @@ def main(config):
     train(**config_dict)
 
 
-def parse_config(config_file):
-
-    config = yaml.load(open(config_file, 'r').read())
-    config['data_dir'] = Path.resolve(config_file.parent / config['data_dir'])
-
-    if not config.get('out_dir', None):
-
-        out_dir = (Path.home() / 'phenotypy_out')
-        try:
-            out_dir.mkdir(parents=False, exist_ok=True)
-        except FileNotFoundError:
-            logging.error(f"Unable to create output directory '{out_dir}'. "
-                          f"Please specify a valid 'out_dir' entry in your config file")
-
-        config['out_dir'] = out_dir
-
-    return config
-
-
-def create_data_loaders(**config):
-
-    training_data = loader_from_csv(Path(config['data_dir']), Path(config['out_dir']),
-                                    Path(config['training_csv']), name='training')
-    validation_data = loader_from_csv(Path(config['data_dir']), Path(config['out_dir']),
-                                      Path(config['validation_csv']), name='validation')
-
-    train_loader = data.DataLoader(training_data,
-                                   batch_size=config['batch_size'],
-                                   shuffle=True,
-                                   num_workers=1,  # TODO check to ensure same video not accessed multiple times
-                                   pin_memory=True)  # TODO this may be problematic
-
-    validation_loader = data.DataLoader(validation_data,
-                                        batch_size=config['batch_size'],
-                                        shuffle=False,
-                                        num_workers=1,
-                                        pin_memory=True)
-
-    return train_loader, validation_loader
-
-
 def train(**config):
 
     train_loader, val_loader = create_data_loaders(**config)
-    train_plotter = Plotter(config['out_dir'], vis=True)
-    val_plotter = Plotter(config['out_dir'], vis=True)
+    train_plotter = Plotter(config['out_dir'], vis=config['visdom'])
+    val_plotter = Plotter(config['out_dir'], vis=config['visdom'])
 
     logging.info("Initialising model")
     model = resnet.resnet10(  # TODO https://github.com/facebook/fb.resnet.torch/blob/master/TRAINING.md#shortcuttype

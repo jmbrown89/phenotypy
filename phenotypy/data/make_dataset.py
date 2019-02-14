@@ -7,6 +7,7 @@ from collections import Counter
 import cv2
 import numpy as np
 import pandas as pd
+import yaml
 import torch
 import torch.utils.data as data
 
@@ -18,38 +19,79 @@ from phenotypy.visualization.plotting import *
 
 
 @click.command()
-@click.argument('input_filepath', type=click.Path(exists=True))
-@click.argument('output_filepath', type=click.Path(exists=True))
-def main(input_filepath, output_filepath):
+@click.argument('config', type=click.Path(exists=True))
+def main(config):
     """ Runs data processing scripts to turn raw data from (../raw) into
         cleaned data ready to be analyzed (saved in ../processed).
     """
     logger = logging.getLogger(__name__)
     logger.info('Making dataset from raw data')
 
-    video_path = Path(input_filepath)
+    config = parse_config(config)
+    # training_data = dataset_from_config(config, name='training')
+    # for i, (clip, target) in enumerate(training_data):
+    #     montage_frames(clip, training_data.label_encoding[target])
 
-    for collection in ['training', 'validation', 'testing']:
+    train_loader, val_loader = create_data_loaders(config)
 
-        csv_file = Path(collection).with_suffix('.csv')
-        data_loader = loader_from_csv(video_path, output_filepath, csv_file, name=collection)
+    for inputs, targets in train_loader:
 
-        # This is example of a training loop, which appears to be working
-        for i, (clip, target) in enumerate(data_loader):
-            montage_frames(clip, data_loader.label_encoding[target])
+        for clip, target in zip(inputs, targets.numpy()):
+            montage_frames(clip, train_loader.dataset.label_encoding[target])
 
 
-def loader_from_csv(data_dir, save_dir, csv_file, name='training'):
+def parse_config(config_file):
+
+    config = yaml.load(open(config_file, 'r').read())
+    config['data_dir'] = Path.resolve(Path(config_file).parent / config['data_dir'])
+
+    if not config.get('out_dir', None):
+
+        out_dir = (Path.home() / 'phenotypy_out')
+        try:
+            out_dir.mkdir(parents=False, exist_ok=True)
+        except FileNotFoundError:
+            logging.error(f"Unable to create output directory '{out_dir}'. "
+                          f"Please specify a valid 'out_dir' entry in your config file")
+
+        config['out_dir'] = out_dir
+
+    return config
+
+
+def create_data_loaders(config):
+
+    training_data = dataset_from_config(config, name='training')
+    validation_data = dataset_from_config(config, name='validation')
+
+    train_loader = data.DataLoader(training_data,
+                                   batch_size=config['batch_size'],
+                                   shuffle=True,
+                                   num_workers=1,  # TODO check to ensure same video not accessed multiple times
+                                   pin_memory=True)  # TODO this may be problematic
+
+    validation_loader = data.DataLoader(validation_data,
+                                        batch_size=config['batch_size'],
+                                        shuffle=False,
+                                        num_workers=1,
+                                        pin_memory=True)
+
+    return train_loader, validation_loader
+
+def dataset_from_config(config, name='training'):
+
+    data_dir, save_dir = config['data_dir'], config['out_dir']
+    csv_file = config[f'{name}_csv']
 
     video_list = pd.read_csv(data_dir / csv_file)['video'].apply(lambda x: data_dir / x).values
     logging.info(f"Found {len(video_list)} videos in '{data_dir}'")
-    loader = VideoCollection(video_list, save_dir, name=name)
+    loader = VideoCollection(video_list, save_dir, config, name=name)
     return loader
 
 
 class VideoCollection(data.Dataset):
 
-    def __init__(self, video_list, processed_dir, name='all'):  # TODO pass in config file for describing the experiment
+    def __init__(self, video_list, processed_dir, config, name='all'):
         """
         VideoCollection is a lightweight wrapper than loads multiple separate video files into Video objects.
         This wrapper serves to generate frame sequences from raw footage, without breaking them down into frames.
@@ -57,6 +99,7 @@ class VideoCollection(data.Dataset):
         """
         self.video_list = video_list
         self.processed_dir = processed_dir
+        self.config = config
         self.name = name
 
         self.video_objects = []
@@ -92,7 +135,9 @@ class VideoCollection(data.Dataset):
             video.encode_labels(self.activity_encoding)
 
         # Precompute batches with which to train
-        self.sampler = SlidingWindowSampler(self.video_objects, window=8, stride=12)  # TODO this will need to be config.
+        window, stride = self.config['clip_length'], self.config['clip_stride']
+
+        self.sampler = SlidingWindowSampler(self.video_objects, window=window, stride=stride)
         self.clips = self.sampler.precompute_clips()
         self.height, self.width = self.video_objects[0].height, self.video_objects[0].width
 
