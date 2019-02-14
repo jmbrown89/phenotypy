@@ -24,12 +24,12 @@ def main(config):
     logger.info('Training started')
 
     config_dict = parse_config(Path(config))
-    train(**config_dict)
+    train(config_dict)
 
 
-def train(**config):
+def train(config):
 
-    train_loader, val_loader = create_data_loaders(**config)
+    train_loader, val_loader = create_data_loaders(config)
     train_plotter = Plotter(config['out_dir'], vis=config['visdom'])
     val_plotter = Plotter(config['out_dir'], vis=config['visdom'])
 
