@@ -71,7 +71,7 @@ def create_data_loaders(config):
                                    pin_memory=True)  # TODO this may be problematic
 
     validation_loader = data.DataLoader(validation_data,
-                                        batch_size=config['batch_size'],
+                                        batch_size=1,
                                         shuffle=False,
                                         num_workers=1,
                                         pin_memory=True)
@@ -102,6 +102,8 @@ class VideoCollection(data.Dataset):
         self.processed_dir = processed_dir
         self.config = config
         self.name = name
+        self.debug = config.get('debug', False)
+        self.limit_clips = config.get('limit_clips', None)
 
         self.video_objects = []
         self.activity_set = set()
@@ -138,7 +140,7 @@ class VideoCollection(data.Dataset):
         # Precompute batches with which to train
         window, stride = self.config['clip_length'], self.config['clip_stride']
 
-        self.sampler = SlidingWindowSampler(self.video_objects, window=window, stride=stride)
+        self.sampler = SlidingWindowSampler(self.video_objects, window=window, stride=stride, limit_clips=self.limit_clips)
         self.clips = self.sampler.precompute_clips()
         self.height, self.width = self.video_objects[0].height, self.video_objects[0].width
 
@@ -146,6 +148,7 @@ class VideoCollection(data.Dataset):
         """
         :return: number of videos in the collection
         """
+
         return len(self.clips)
 
     def __getitem__(self, item):
@@ -163,7 +166,7 @@ class VideoCollection(data.Dataset):
             Scale((128, 128)),
             RandomHorizontalFlip(),
             ToTensor(),
-            Normalize([0, 0, 0], [1, 1, 1])
+            # Normalize([0, 0, 0], [1, 1, 1])  # mean/SD of clip channels
         ])
 
         spatial_transform.randomize_parameters()  # once per clip!

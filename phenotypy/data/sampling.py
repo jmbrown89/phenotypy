@@ -20,12 +20,13 @@ class Sampler(object):
 
 class SlidingWindowSampler(Sampler):
 
-    def __init__(self, video_objects, window=8, stride=1):
+    def __init__(self, video_objects, window=8, stride=1, limit_clips=None):
 
         Sampler.__init__(self, video_objects)
         self.window = window
         self.stride = stride
         self.attempts = 10
+        self.limit_clips = limit_clips
 
     def precompute_clips(self):
 
@@ -48,8 +49,12 @@ class SlidingWindowSampler(Sampler):
                     idxs, labels = sample
                     if len(labels) == 1:
                         clips.append((v_index, idxs, labels[0]))
+                        break  # no need for more attempts
                     else:
                         continue
+
+                if self.limit_clips and len(clips) >= self.limit_clips:
+                    return clips
 
         return clips
 

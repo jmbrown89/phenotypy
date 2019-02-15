@@ -45,28 +45,26 @@ def train(config):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     trainer = create_supervised_trainer(model, optimizer, loss, device=device)
-    evaluator = create_supervised_evaluator(model,
-                                            metrics={'accuracy': Accuracy(),
-                                                     'loss': Loss(loss)},
+    evaluator = create_supervised_evaluator(model, metrics={'accuracy': Accuracy(), 'loss': Loss(loss)},
                                             device=device)
 
     @trainer.on(Events.ITERATION_COMPLETED)
     def log_training_loss(engine):
-        iter = (engine.state.iteration - 1) % len(train_loader) + 1
-        if iter % config['log_interval'] == 0:
-            print("Epoch[{}] Iteration[{}/{}] Loss: {:.2f}"
-                  "".format(engine.state.epoch, iter, len(train_loader), engine.state.output))
+        iteration = (engine.state.iteration - 1) % len(train_loader) + 1
+        if iteration % config['log_interval'] == 0:
+            logging.info("Epoch[{}] Iteration[{}/{}] Loss: {:.2f}"
+                         .format(engine.state.epoch, iteration, len(train_loader), engine.state.output))
             train_plotter.plot_loss(engine)
 
-    @trainer.on(Events.EPOCH_COMPLETED)
-    def log_training_results(engine):
-        evaluator.run(train_loader)
-        metrics = evaluator.state.metrics
-        avg_accuracy = metrics['accuracy']
-        avg_loss = metrics['loss']
-        print("Training Results - Epoch: {}  Avg accuracy: {:.2f} Avg loss: {:.2f}"
-              .format(engine.state.epoch, avg_accuracy, avg_loss))
-        train_plotter.plot_loss_accuracy(engine, avg_accuracy, avg_loss)
+    # @trainer.on(Events.EPOCH_COMPLETED)
+    # def log_training_results(engine):
+    #     evaluator.run(train_loader)
+    #     metrics = evaluator.state.metrics
+    #     avg_accuracy = metrics['accuracy']
+    #     avg_loss = metrics['loss']
+    #     print("Training Results - Epoch: {}  Avg accuracy: {:.2f} Avg loss: {:.2f}"
+    #           .format(engine.state.epoch, avg_accuracy, avg_loss))
+    #     train_plotter.plot_loss_accuracy(engine, avg_accuracy, avg_loss)
 
     @trainer.on(Events.EPOCH_COMPLETED)
     def log_validation_results(engine):
@@ -74,8 +72,8 @@ def train(config):
         metrics = evaluator.state.metrics
         avg_accuracy = metrics['accuracy']
         avg_loss = metrics['loss']
-        print("Validation Results - Epoch: {}  Avg accuracy: {:.2f} Avg loss: {:.2f}"
-              .format(engine.state.epoch, avg_accuracy, avg_loss))
+        logging.info("Validation Results - Epoch: {}  Avg accuracy: {:.2f} Avg loss: {:.2f}"
+                     .format(engine.state.epoch, avg_accuracy, avg_loss))
         val_plotter.plot_loss_accuracy(engine, avg_accuracy, avg_loss)
 
     trainer.run(train_loader, max_epochs=config['epochs'])
