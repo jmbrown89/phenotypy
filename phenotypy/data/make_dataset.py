@@ -122,11 +122,12 @@ class VideoCollection(data.Dataset):
 
         # Precompute batches with which to train
         window, stride = self.config['clip_length'], self.config['clip_stride']
-
         self.sampler = SlidingWindowSampler(self.video_objects, window=window, stride=stride, limit_clips=self.limit_clips)
         self.clips = self.sampler.precompute_clips()
         self.height, self.width = self.video_objects[0].height, self.video_objects[0].width
         logger.info(f'Clips extracted for {self.name}: {len(self.clips)}')
+
+        # TODO need to calculate label statistics over the sampled data....
 
     def __len__(self):
         """
@@ -154,8 +155,14 @@ class VideoCollection(data.Dataset):
         ])
 
         spatial_transform.randomize_parameters()  # once per clip!
-        clip = [spatial_transform(img) for img in clip]
-        clip = torch.stack(clip, 0).permute(1, 0, 2, 3)
+
+        try:
+            clip = [spatial_transform(img) for img in clip]
+            clip = torch.stack(clip, 0).permute(1, 0, 2, 3)
+        except TypeError:
+            logger.critical(f"Unable to load clip at location {f_idxs[0]} - {f_idxs[-1]} "
+                            f"from video '{self.video_objects[v_idx].video_path.name}'")
+            exit(1)
 
         return clip, label
 
@@ -250,9 +257,14 @@ class Video:
 
             self.video.set(cv2.CAP_PROP_POS_FRAMES, idx)
             res, frame = self.video.read()  # BGR!!!!
+            attempt = 0
+
+            while not res and attempt < 10:
+                attempt += 1
+                res, frame = self.video.read()
 
             if not res:
-                return None  # TODO need to handle this better
+                return None
 
             # TODO make this configurable
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)

@@ -55,9 +55,9 @@ def train(config, experiment_name=None):
     trainer = create_supervised_trainer(model, optimizer, loss, device=device)
     evaluator = create_supervised_evaluator(model, metrics={'accuracy': Accuracy(), 'loss': Loss(loss)},
                                             device=device)
-    val_loss, val_acc = [], []
+    train_loss, val_loss, val_acc = [], [], []
 
-    checkpointer = ModelCheckpoint(Path(config['out_dir']) / 'checkpoints', 'checkpoint_', save_interval=1)
+    checkpointer = ModelCheckpoint(Path(config['out_dir']) / 'checkpoints', experiment_name, save_interval=1)
     trainer.add_event_handler(Events.EPOCH_COMPLETED, checkpointer, {'model': model})
 
     @trainer.on(Events.ITERATION_COMPLETED)
@@ -67,6 +67,7 @@ def train(config, experiment_name=None):
             logger.info("Epoch[{}] Iteration[{}/{}] Loss: {:.2f}"
                         .format(engine.state.epoch, iteration, len(train_loader), engine.state.output))
             train_plotter.plot_loss(engine)
+            train_loss.append(engine.state.output)
 
     @trainer.on(Events.EPOCH_COMPLETED)
     def log_validation_results(engine):
@@ -88,6 +89,8 @@ def train(config, experiment_name=None):
     results['accuracy'] = val_acc
     results['loss'] = val_loss
     results.to_csv(Path(config['out_dir'] / 'val_results.csv'))
+    pd.DataFrame(pd.Series(train_loss, name='loss')).to_csv(Path(config['out_dir'] / 'train_results.csv'))
+
 
 
 if __name__ == '__main__':
