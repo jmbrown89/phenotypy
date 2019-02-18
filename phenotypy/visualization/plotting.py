@@ -65,6 +65,10 @@ class Plotter:
         except AttributeError:
             pass
 
+    def plot_confusion(self):
+
+        pass
+
     def plot_activity_frequency(self, count_object):
 
         df = pd.DataFrame({'count': count_object})

@@ -1,0 +1,53 @@
+import click
+import logging
+from pathlib import Path
+from dotenv import find_dotenv, load_dotenv
+from copy import deepcopy
+
+from phenotypy.misc.utils import parse_config_ls, init_log
+from phenotypy.misc.math import mrange
+from phenotypy.models.train_model import train
+
+
+@click.command()
+@click.argument('config', type=click.Path(exists=True))
+def main(config):
+    """ Runs training based on the provided config file.
+    """
+    config_dict, params = parse_config_ls(Path(config))
+
+    for search_param in sorted(params):
+
+        search_config = deepcopy(config_dict)
+        search_range = None
+
+        for fixed in params:  # set the fixed value for all other parameters
+
+            if fixed == 'layers':
+                fixed_range = config_dict[fixed]
+                fixed_value = 34
+            else:
+                fixed_range = mrange(*config_dict[fixed])
+                fixed_value = fixed_range[len(fixed_range) // 2]
+
+            if search_param != fixed:
+                search_config[fixed] = fixed_value
+            else:
+                search_range = fixed_range
+
+        for search_val in search_range:
+
+            search_config[search_param] = search_val
+            train(search_config, f'{search_param}_{search_val}')
+
+
+if __name__ == '__main__':
+
+    # not used in this stub but often useful for finding various files
+    project_dir = Path(__file__).resolve().parents[2]
+
+    # find .env automagically by walking up directories until it's found, then
+    # load up the .env entries as environment variables
+    load_dotenv(find_dotenv())
+
+    main()

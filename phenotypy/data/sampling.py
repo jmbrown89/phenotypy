@@ -12,6 +12,7 @@ class Sampler(object):
 
         self.video_objects = video_objects
         self.idx = 0
+        self.logger = logging.getLogger(__name__)
 
     def sample_frames(self, v_index):
 
@@ -24,7 +25,7 @@ class SlidingWindowSampler(Sampler):
 
         Sampler.__init__(self, video_objects)
         self.window = window
-        self.stride = stride
+        self.stride = stride if isinstance(stride, int) else int(round(window * stride))
         self.attempts = 10
         self.limit_clips = limit_clips
 
@@ -33,7 +34,8 @@ class SlidingWindowSampler(Sampler):
         clips = []
         for v_index, video in enumerate(self.video_objects):
 
-            logging.info(f"Extracting batches from video '{video.video_path.stem}', which has {video.frames} frames")
+            self.logger.info(f"Extracting batches from video '{video.video_path.stem}',"
+                             f" which has {video.frames} frames")
             self.idx = 0
 
             sample = True

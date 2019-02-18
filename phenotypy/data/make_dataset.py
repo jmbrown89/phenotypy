@@ -7,7 +7,6 @@ from collections import Counter
 import cv2
 import numpy as np
 import pandas as pd
-import yaml
 import torch
 import torch.utils.data as data
 
@@ -15,7 +14,10 @@ from phenotypy.data.loading import load_video
 from phenotypy.data.sampling import SlidingWindowSampler
 from phenotypy.data.transforms import *
 from phenotypy.misc.dict_tools import *
+from phenotypy.misc.utils import parse_config
 from phenotypy.visualization.plotting import *
+
+logger = logging.getLogger(__name__)
 
 
 @click.command()
@@ -24,7 +26,6 @@ def main(config):
     """ Runs data processing scripts to turn raw data from (../raw) into
         cleaned data ready to be analyzed (saved in ../processed).
     """
-    logger = logging.getLogger(__name__)
     logger.info('Making dataset from raw data')
 
     config = parse_config(config)
@@ -33,30 +34,12 @@ def main(config):
     #     montage_frames(clip, training_data.label_encoding[target])
 
     train_loader, val_loader = create_data_loaders(config)
+    train_loader.dataset.statistics(plotter=Plotter('../../data/processed', '_'))
 
-    for inputs, targets in train_loader:
-
-        for clip, target in zip(inputs, targets.numpy()):
-            montage_frames(clip, train_loader.dataset.label_encoding[target])
-
-
-def parse_config(config_file):
-
-    config = yaml.load(open(config_file, 'r').read())
-    config['data_dir'] = Path.resolve(Path(config_file).parent / config['data_dir'])
-
-    if not config.get('out_dir', None):
-
-        out_dir = (Path.home() / 'phenotypy_out')
-        try:
-            out_dir.mkdir(parents=False, exist_ok=True)
-        except FileNotFoundError:
-            logging.error(f"Unable to create output directory '{out_dir}'. "
-                          f"Please specify a valid 'out_dir' entry in your config file")
-
-        config['out_dir'] = out_dir
-
-    return config
+    # for inputs, targets in train_loader:
+    #
+    #     for clip, target in zip(inputs, targets.numpy()):
+    #         montage_frames(clip, train_loader.dataset.label_encoding[target])
 
 
 def create_data_loaders(config):
@@ -85,7 +68,7 @@ def dataset_from_config(config, name='training'):
     csv_file = config[f'{name}_csv']
 
     video_list = pd.read_csv(data_dir / csv_file)['video'].apply(lambda x: data_dir / x).values
-    logging.info(f"Found {len(video_list)} videos in '{data_dir}'")
+    logger.info(f"Found {len(video_list)} videos in '{data_dir}'")
     loader = VideoCollection(video_list, save_dir, config, name=name)
     return loader
 
@@ -103,7 +86,7 @@ class VideoCollection(data.Dataset):
         self.config = config
         self.name = name
         self.debug = config.get('debug', False)
-        self.limit_clips = config.get('limit_clips', None)
+        self.limit_clips = None if not self.debug else config.get('limit_clips', None)
 
         self.video_objects = []
         self.activity_set = set()
@@ -143,6 +126,7 @@ class VideoCollection(data.Dataset):
         self.sampler = SlidingWindowSampler(self.video_objects, window=window, stride=stride, limit_clips=self.limit_clips)
         self.clips = self.sampler.precompute_clips()
         self.height, self.width = self.video_objects[0].height, self.video_objects[0].width
+        logger.info(f'Clips extracted for {self.name}: {len(self.clips)}')
 
     def __len__(self):
         """
@@ -182,20 +166,16 @@ class VideoCollection(data.Dataset):
         :param plotter: plotting object with which to generate plots
         """
 
-        logging.info(f"Number of videos: {len(self.video_list)}")
-        logging.info(f"Number of annotations (one or more frames): {len(self.annotations)}")
-        logging.info(f"Number of unique activities: {self.no_classes}")
+        logger.info(f"Number of videos: {len(self.video_list)}")
+        logger.info(f"Number of annotations (one or more frames): {len(self.annotations)}")
+        logger.info(f"Number of unique activities: {self.no_classes}")
 
         label_counts = Counter(self.annotations)
         plotter.plot_activity_frequency(label_counts)
 
         # Plot activity lengths
         raw_annotations = pd.concat([video.raw_annotations for video in self.video_objects], axis=0)
-        # plotter.plot_activity_length(raw_annotations[raw_annotations['activity'] != 'rest'], unit='seconds')
         plotter.plot_activity_length(raw_annotations[raw_annotations['activity'] != 'rest'], unit='frames')
-
-        # for video in self.video_objects:
-        #     video.statistics()
 
 
 class Video:
@@ -223,7 +203,7 @@ class Video:
         self.frame_labels = None
 
         # Load raw video and annotations
-        logging.info(f"Loading video '{video_path}'")
+        logger.info(f"Loading video '{video_path}'")
         self.video, self.fps, self.channels, self.frames, self.height, self.width = load_video(video_path)
         self._load_annotations(video_path)
 
@@ -242,7 +222,7 @@ class Video:
         try:
             assert(Path.is_file(annot_path))
         except AssertionError:
-            logging.warning(f"Unable to locate annotation file for video '{input_video.name}'")
+            logger.warning(f"Unable to locate annotation file for video '{input_video.name}'")
             exit(1)
 
         # logging.info(f"Loading annotations '{annot_path}'")
@@ -293,11 +273,11 @@ class Video:
         """
 
         if self.collection is None:
-            logging.error("Video must be part of a VideoCollection object in order to encode labels.")
+            logger.error("Video must be part of a VideoCollection object in order to encode labels.")
         else:
             # logging.info(f"'{self.video_path.name}' using labels from collection '{self.collection.name}'")
             if encoding != self.collection.activity_encoding:
-                logging.error(f"Video activity encoding does not match its collection object f'{self.collection.name}'")
+                logger.error(f"Video activity encoding does not match its collection object f'{self.collection.name}'")
                 exit(1)
 
         if encoding is not None:
