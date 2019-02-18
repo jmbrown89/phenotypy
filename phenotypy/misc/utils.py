@@ -27,6 +27,7 @@ def parse_config(config_file):
 
     else:
         config['out_dir'] = Path.resolve(Path(config_file).parent / config['out_dir'])
+        config['out_dir'].mkdir(parents=False, exist_ok=True)
 
     return config
 
