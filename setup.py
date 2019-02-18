@@ -7,4 +7,7 @@ setup(
     description='A Python package for automated, machine learning-based phenotyping of small animals',
     author='James M. Brown',
     license='MIT',
+    entry_points={
+        "console_scripts": ['phenotypy = phenotypy.__main__:main']
+    },
 )

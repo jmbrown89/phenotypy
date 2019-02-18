@@ -26,7 +26,7 @@ def main(config):
     """
 
     config_dict = parse_config(Path(config))
-    train(config_dict)
+    train(config_dict, experiment_name=Path(config).name)
 
 
 def train(config, experiment_name=None):
