@@ -128,7 +128,11 @@ class VideoCollection(data.Dataset):
         self.height, self.width = self.video_objects[0].height, self.video_objects[0].width
         logger.info(f'Clips extracted for {self.name}: {len(self.clips)}')
 
-        # TODO need to calculate label statistics over the sampled data....
+        # Some statistics
+        logger.info(f"{self.name.capitalize()} data sampling complete")
+        stats = Counter([sample[-1] for sample in self.clips])
+        for label in sorted(stats.keys()):
+            logger.info(f"{self.label_encoding[label]}: {((stats[label] / sum(stats.values())) * 100):.1f}%")
 
     def _preprocessing(self):
 
