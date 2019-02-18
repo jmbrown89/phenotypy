@@ -95,6 +95,7 @@ class VideoCollection(data.Dataset):
         self.annotations = []
 
         self._create_dataset()
+        self._preprocessing()
 
     def _create_dataset(self):
         """
@@ -129,6 +130,16 @@ class VideoCollection(data.Dataset):
 
         # TODO need to calculate label statistics over the sampled data....
 
+    def _preprocessing(self):
+
+        transforms = [ToPIL(), Scale((128, 128))]
+
+        if self.name == 'training':
+            transforms.append(RandomHorizontalFlip())  # TODO add more augmentation with config options
+
+        transforms.append(ToTensor())
+        self.spatial_transform = Compose(transforms)
+
     def __len__(self):
         """
         :return: number of videos in the collection
@@ -145,19 +156,10 @@ class VideoCollection(data.Dataset):
 
         v_idx, f_idxs, label = self.clips[item]
         clip = self.video_objects[v_idx].get_frames(f_idxs)
-
-        spatial_transform = Compose([  # TODO add to config file - make it a sub-dict
-            ToPIL(),
-            Scale((128, 128)),
-            RandomHorizontalFlip(),
-            ToTensor(),
-            # Normalize([0, 0, 0], [1, 1, 1])  # mean/SD of clip channels
-        ])
-
-        spatial_transform.randomize_parameters()  # once per clip!
+        self.spatial_transform.randomize_parameters()  # once per clip!
 
         try:
-            clip = [spatial_transform(img) for img in clip]
+            clip = [self.spatial_transform(img) for img in clip]
             clip = torch.stack(clip, 0).permute(1, 0, 2, 3)
         except TypeError:
             logger.critical(f"Unable to load clip at location {f_idxs[0]} - {f_idxs[-1]} "
@@ -259,8 +261,13 @@ class Video:
             res, frame = self.video.read()  # BGR!!!!
             attempt = 0
 
-            while not res and attempt < 10:
+            while not res and attempt < 3:
                 attempt += 1
+                logger.warning(f"Failed attempt #{attempt} reading '{self.video_path.name}'"
+                               f" (opened = {self.video.isOpened()})")
+                self.video.release()
+                self.video, self.fps, self.channels, self.frames, self.height, self.width = load_video(self.video_path)
+                self.video.set(cv2.CAP_PROP_POS_FRAMES, idx)
                 res, frame = self.video.read()
 
             if not res:
