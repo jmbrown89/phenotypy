@@ -13,7 +13,7 @@ from ignite.metrics import Accuracy, Loss
 from ignite.handlers import ModelCheckpoint
 
 from phenotypy.data.make_dataset import parse_config, create_data_loaders
-from phenotypy.misc.utils import init_log
+from phenotypy.misc.utils import init_log, increment_path
 from phenotypy.models import resnet
 from phenotypy.models.evaluate_model import confusion
 from phenotypy.visualization.plotting import Plotter
@@ -30,18 +30,27 @@ def main(config):
 def train(config_path, experiment_name=None):
 
     config = parse_config(Path(config_path))
+    logger = logging.getLogger(__name__)
 
     if not experiment_name:
-        experiment_name = Path(config_path).name
+        experiment_name = Path(config_path).stem
 
-    init_log((Path(config['out_dir']) / experiment_name).with_suffix('.log'))
+    try:
+        experiment_dir = Path(config['out_dir']) / experiment_name
+        experiment_dir.mkdir(parents=False, exist_ok=False)
+    except FileExistsError:
+        experiment_dir = increment_path(Path(config['out_dir']), experiment_name + '_({})')
+        experiment_dir.mkdir(parents=False, exist_ok=False)
+        print(f"Warning: experiment '{experiment_name}' already exists!")
 
-    logger = logging.getLogger(__name__)
+    log_file = (experiment_dir / experiment_name).with_suffix('.log')
+    print(f"Logging to '{log_file}'")
+    init_log(log_file)
     logger.info('Training started')
 
     train_loader, val_loader = create_data_loaders(config)
-    train_plotter = Plotter(config['out_dir'], vis=config['visdom'])
-    val_plotter = Plotter(config['out_dir'], vis=config['visdom'])
+    train_plotter = Plotter(experiment_dir, vis=config['visdom'])
+    val_plotter = Plotter(experiment_dir, vis=config['visdom'])
 
     logger.info("Initialising model")
     layers = config['layers']
@@ -60,7 +69,8 @@ def train(config_path, experiment_name=None):
                                             device=device)
     train_loss, val_loss, val_acc = [], [], []
 
-    checkpointer = ModelCheckpoint(Path(config['out_dir']) / 'checkpoints', experiment_name, save_interval=1)
+    checkpointer = ModelCheckpoint(Path(experiment_dir) / 'checkpoints', 'checkpoint',
+                                   save_interval=1, n_saved=config['epochs'])
     trainer.add_event_handler(Events.EPOCH_COMPLETED, checkpointer, {'model': model})
 
     @trainer.on(Events.ITERATION_COMPLETED)
@@ -87,13 +97,17 @@ def train(config_path, experiment_name=None):
         # val_plotter.plot_confusion(confusion())
 
     trainer.run(train_loader, max_epochs=config['epochs'])
+    logger.info("Training complete!")
 
+    # Results
+    torch.save(model, str(Path(experiment_dir) / 'final_model.pth'))
     results = pd.DataFrame()
     results['accuracy'] = val_acc
     results['loss'] = val_loss
-    results.to_csv(Path(config['out_dir'] / 'val_results.csv'))
-    pd.DataFrame(pd.Series(train_loss, name='loss')).to_csv(Path(config['out_dir'] / 'train_results.csv'))
-
+    results.to_csv(Path(experiment_dir / 'val_results.csv'))
+    pd.DataFrame(pd.Series(train_loss, name='loss')).to_csv(Path(experiment_dir / 'train_results.csv'))
+    logger.info(f"Results saved to '{experiment_dir}'")
+    return results
 
 
 if __name__ == '__main__':

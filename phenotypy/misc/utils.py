@@ -9,10 +9,19 @@ def init_log(out_path):
     logging.basicConfig(level=logging.INFO, format=log_fmt, filename=out_path, filemode='w')
 
 
+def increment_path(directory, name_pattern):
+    counter = 0
+    while True:
+        counter += 1
+        path = directory / name_pattern.format(counter)
+        if not path.exists():
+            return path
+
+
 def parse_config(config_file):
 
     config = yaml.load(open(config_file, 'r').read())
-    config['data_dir'] = Path.resolve(Path(config_file).parent / config['data_dir'])
+    config['data_dir'] = str(Path.resolve(Path(config_file).parent / config['data_dir']))
 
     if not config.get('out_dir', None):
 
@@ -23,11 +32,12 @@ def parse_config(config_file):
             logging.error(f"Unable to create output directory '{out_dir}'. "
                           f"Please specify a valid 'out_dir' entry in your config file")
 
-        config['out_dir'] = out_dir
+        config['out_dir'] = str(out_dir)
 
     else:
-        config['out_dir'] = Path.resolve(Path(config_file).parent / config['out_dir'])
-        config['out_dir'].mkdir(parents=False, exist_ok=True)
+        out_dir = Path.resolve(Path(config_file).parent / config['out_dir'])
+        out_dir.mkdir(parents=False, exist_ok=True)
+        config['out_dir'] = out_dir
 
     return config
 

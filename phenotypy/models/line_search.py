@@ -44,14 +44,13 @@ def line_search(config):
         for search_val in search_range:
 
             search_config[search_param] = search_val
-            search_config['base_config'] = config
+            search_config['base_config'] = str(Path(config).absolute())
+            out_file = Path(config_dict['out_dir']) / f'{search_param}_{search_val}.yaml'
 
-            out_file = Path(config['out_dir']) / f'{search_param}_{search_val}.yaml'
+            with open(out_file, 'w') as f:
+                yaml.dump(search_config, stream=f, default_flow_style=False)  # output the config for reproducibility
 
-            with open(out_file) as f:
-                yaml.dump(f)  # output the config for reproducibility
-
-            train(out_file)
+            val_results = train(out_file)
 
 
 if __name__ == '__main__':

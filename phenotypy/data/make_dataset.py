@@ -64,7 +64,7 @@ def create_data_loaders(config):
 
 def dataset_from_config(config, name='training'):
 
-    data_dir, save_dir = config['data_dir'], config['out_dir']
+    data_dir, save_dir = Path(config['data_dir']), Path(config['out_dir'])
     csv_file = config[f'{name}_csv']
 
     video_list = pd.read_csv(data_dir / csv_file)['video'].apply(lambda x: data_dir / x).values
@@ -128,12 +128,6 @@ class VideoCollection(data.Dataset):
         self.height, self.width = self.video_objects[0].height, self.video_objects[0].width
         logger.info(f'Clips extracted for {self.name}: {len(self.clips)}')
 
-        # Some statistics
-        logger.info(f"{self.name.capitalize()} data sampling complete")
-        stats = Counter([sample[-1] for sample in self.clips])
-        for label in sorted(stats.keys()):
-            logger.info(f"{self.label_encoding[label]}: {((stats[label] / sum(stats.values())) * 100):.1f}%")
-
     def _preprocessing(self):
 
         transforms = [ToPIL(), Scale((128, 128))]
@@ -179,16 +173,17 @@ class VideoCollection(data.Dataset):
         :param plotter: plotting object with which to generate plots
         """
 
+        sample_stats = Counter([sample[-1] for sample in self.clips])
         logger.info(f"Number of videos: {len(self.video_list)}")
         logger.info(f"Number of annotations (one or more frames): {len(self.annotations)}")
         logger.info(f"Number of unique activities: {self.no_classes}")
+        logger.info(f"Label distribution of sampled data: {sample_stats}")
 
-        label_counts = Counter(self.annotations)
-        plotter.plot_activity_frequency(label_counts)
-
-        # Plot activity lengths
+        # Plot activity lengths and frequency of annotations
         raw_annotations = pd.concat([video.raw_annotations for video in self.video_objects], axis=0)
+        label_counts = Counter(self.annotations)
         plotter.plot_activity_length(raw_annotations[raw_annotations['activity'] != 'rest'], unit='frames')
+        plotter.plot_activity_frequency(label_counts)
 
 
 class Video:
