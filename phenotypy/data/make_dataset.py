@@ -51,13 +51,13 @@ def create_data_loaders(config):
                                    batch_size=config['batch_size'],
                                    shuffle=True,
                                    num_workers=1,  # TODO check to ensure same video not accessed multiple times
-                                   pin_memory=True)  # TODO this may be problematic
+                                   pin_memory=False)  # TODO this may be problematic
 
     validation_loader = data.DataLoader(validation_data,
                                         batch_size=1,
                                         shuffle=False,
                                         num_workers=1,
-                                        pin_memory=True)
+                                        pin_memory=False)
 
     return train_loader, validation_loader
 
@@ -265,7 +265,7 @@ class Video:
             res, frame = self.video.read()  # BGR!!!!
             attempt = 0
 
-            while not res and attempt < 3:
+            while not res and attempt < 5:
                 attempt += 1
                 logger.warning(f"Failed attempt #{attempt} reading '{self.video_path.name}'"
                                f" (opened = {self.video.isOpened()})")
