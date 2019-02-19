@@ -24,12 +24,15 @@ from phenotypy.visualization.plotting import Plotter
 def main(config):
     """ Runs training based on the provided config file.
     """
-
-    config_dict = parse_config(Path(config))
-    train(config_dict, experiment_name=Path(config).name)
+    train(config)
 
 
-def train(config, experiment_name=None):
+def train(config_path, experiment_name=None):
+
+    config = parse_config(Path(config_path))
+
+    if not experiment_name:
+        experiment_name = Path(config_path).name
 
     init_log((Path(config['out_dir']) / experiment_name).with_suffix('.log'))
 

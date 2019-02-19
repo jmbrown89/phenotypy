@@ -52,18 +52,15 @@ class Phenotypy(object):
         parser = ArgumentParser(description='Train a new model for HCA using a custom configuration file')
 
         parser.add_argument('-c', '--config', help='Configuration file', dest='config', required=True)
-        parser.add_argument('-n', '--name', help='Name of experiment', dest='name', required=True)
         parser.add_argument('--search', help='Perform line search', action='store_true', dest='search', default=False)
         args = parser.parse_args(sys.argv[2:])
 
-        print(args)
-
         if args.search:
-            from phenotypy.models.line_search import main as line_search
+            from phenotypy.models.line_search import line_search
             line_search(args.config)
         else:
-            from phenotypy.models.train_model import main as train_single
-            train_single(args.config)
+            from phenotypy.models.train_model import train
+            train(args.config)
 
 
 def initialize():

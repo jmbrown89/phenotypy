@@ -3,6 +3,7 @@ import logging
 from pathlib import Path
 from dotenv import find_dotenv, load_dotenv
 from copy import deepcopy
+import yaml
 
 from phenotypy.misc.utils import parse_config_ls, init_log
 from phenotypy.misc.math import mrange
@@ -14,6 +15,11 @@ from phenotypy.models.train_model import train
 def main(config):
     """ Runs training based on the provided config file.
     """
+    line_search(config)
+
+
+def line_search(config):
+
     config_dict, params = parse_config_ls(Path(config))
 
     for search_param in sorted(params):
@@ -38,7 +44,14 @@ def main(config):
         for search_val in search_range:
 
             search_config[search_param] = search_val
-            train(search_config, f'{search_param}_{search_val}')
+            search_config['base_config'] = config
+
+            out_file = Path(config['out_dir']) / f'{search_param}_{search_val}.yaml'
+
+            with open(out_file) as f:
+                yaml.dump(f)  # output the config for reproducibility
+
+            train(out_file)
 
 
 if __name__ == '__main__':
