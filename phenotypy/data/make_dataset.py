@@ -257,9 +257,6 @@ class Video:
         :param idxs: indices of the video from which frames should be sampled
         :return: sampled frames
         """
-        if self.collection.name == 'validation':
-            print(self.video_path)
-            print(idxs)
         return [self.get_frame(idx) for idx in idxs]
 
     def get_frame(self, idx):
