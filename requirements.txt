@@ -8,3 +8,9 @@ pandas==0.23.4
 python-dotenv==0.10.1
 torch==1.0.0
 appdirs
+pyyaml
+pytorch-ignite
+opencv-python
+Pillow
+visdom
+scikit-learn

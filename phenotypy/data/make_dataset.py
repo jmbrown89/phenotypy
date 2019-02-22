@@ -50,14 +50,18 @@ def create_data_loaders(config):
     train_loader = data.DataLoader(training_data,
                                    batch_size=config['batch_size'],
                                    shuffle=True,
-                                   num_workers=1,  # TODO check to ensure same video not accessed multiple times
-                                   pin_memory=False)  # TODO this may be problematic
+                                   num_workers=0,
+                                   pin_memory=True,
+                                   drop_last=True)
 
+    # TODO: Figure out what was going (and might still be) wrong with this
+    # The solution is some combination of batch size > 1, num_workers=0, pin_memory = True, and drop_last = True
     validation_loader = data.DataLoader(validation_data,
-                                        batch_size=1,
+                                        batch_size=config['batch_size'],
                                         shuffle=False,
-                                        num_workers=1,
-                                        pin_memory=False)
+                                        num_workers=0,
+                                        pin_memory=True,
+                                        drop_last=True)
 
     return train_loader, validation_loader
 
@@ -86,7 +90,7 @@ class VideoCollection(data.Dataset):
         self.config = config
         self.name = name
         self.debug = config.get('debug', False)
-        self.limit_clips = None if not self.debug else config.get('limit_clips', None)
+        self.limit_clips = None if not self.debug or name == 'validation' else config.get('limit_clips', None)
 
         self.video_objects = []
         self.activity_set = set()
@@ -214,6 +218,7 @@ class Video:
         logger.info(f"Loading video '{video_path}'")
         self.video, self.fps, self.channels, self.frames, self.height, self.width = load_video(video_path)
         self._load_annotations(video_path)
+        self.cache = {}
 
     def _load_annotations(self, input_video, annotator=1):
         """
@@ -246,41 +251,54 @@ class Video:
 
     def get_frames(self, idxs):
         """
-        This function will simply extract frames at the indices specified, in that order, and return them as a list.
+        Get a sequence of frames at the indices given, in order, and return them as a list.
         This function does not return the corresponding annotations, as the indices are assumed to be provided in such a
         way that the label would be the same for all frames.
         :param idxs: indices of the video from which frames should be sampled
         :return: sampled frames
         """
+        if self.collection.name == 'validation':
+            print(self.video_path)
+            print(idxs)
+        return [self.get_frame(idx) for idx in idxs]
 
-        frames = []
-        for idx in idxs:
+    def get_frame(self, idx):
+        """
+        Get video frame at the index specified.
+        :param idx: integer index of the frame to return
+        :return: the frame at the location given
+        """
 
+        # if idx in self.cache:
+        #     return self.cache[idx]
+
+        self.video.set(cv2.CAP_PROP_POS_FRAMES, idx)
+        res, frame = self.video.read()  # BGR!!!!
+        attempt = 0
+
+        while not res and attempt < 5:
+            attempt += 1
+            logger.warning(f"Failed attempt #{attempt} reading '{self.video_path.name}'"
+                           f" (opened = {self.video.isOpened()})")
+            self.video.set(cv2.CAP_PROP_POS_FRAMES, idx - 1)
             self.video.set(cv2.CAP_PROP_POS_FRAMES, idx)
-            res, frame = self.video.read()  # BGR!!!!
-            attempt = 0
+            # self.video.release()
+            # self.video, self.fps, self.channels, self.frames, self.height, self.width = load_video(self.video_path)
+            # self.video.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            res, frame = self.video.read()
 
-            while not res and attempt < 5:
-                attempt += 1
-                logger.warning(f"Failed attempt #{attempt} reading '{self.video_path.name}'"
-                               f" (opened = {self.video.isOpened()})")
-                self.video.release()
-                self.video, self.fps, self.channels, self.frames, self.height, self.width = load_video(self.video_path)
-                self.video.set(cv2.CAP_PROP_POS_FRAMES, idx)
-                res, frame = self.video.read()
+        if not res:
+            return None
 
-            if not res:
-                return None
+        # TODO make this configurable
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        frame = np.pad(frame, ((8, 8), (0, 0), (0, 0)), mode='symmetric')
 
-            # TODO make this configurable
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frame = np.pad(frame, ((8, 8), (0, 0), (0, 0)), mode='symmetric')
+        crop = (frame.shape[1] - frame.shape[0]) // 2
+        frame = frame[:, crop:-crop, :]
+        # self.cache[idx] = frame
 
-            crop = (frame.shape[1] - frame.shape[0]) // 2
-            frame = frame[:, crop:-crop, :]
-            frames.append(frame)
-
-        return frames
+        return frame
 
     def encode_labels(self, encoding=None):
         """

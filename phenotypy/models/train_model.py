@@ -5,8 +5,8 @@ from dotenv import find_dotenv, load_dotenv
 import pandas as pd
 
 import torch
+torch.backends.cudnn.benchmark = False
 from torch import optim
-import torch.utils.data as data
 import torch.nn.functional as F
 from ignite.engine import Events, create_supervised_trainer, create_supervised_evaluator
 from ignite.metrics import Accuracy, Loss
@@ -37,7 +37,7 @@ def train(config_path, experiment_name=None):
 
     try:
         experiment_dir = Path(config['out_dir']) / experiment_name
-        experiment_dir.mkdir(parents=False, exist_ok=False)
+        experiment_dir.mkdir(parents=False, exist_ok=config.get('clobber', False))
     except FileExistsError:
         experiment_dir = increment_path(Path(config['out_dir']), experiment_name + '_({})')
         experiment_dir.mkdir(parents=False, exist_ok=False)
@@ -64,14 +64,17 @@ def train(config_path, experiment_name=None):
     loss = F.cross_entropy
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    trainer = create_supervised_trainer(model, optimizer, loss, device=device)
+    trainer = create_supervised_trainer(model, optimizer, loss, device=device, non_blocking=True)
     evaluator = create_supervised_evaluator(model, metrics={'accuracy': Accuracy(), 'loss': Loss(loss)},
-                                            device=device)
+                                            device=device, non_blocking=True)
     train_loss, val_loss, val_acc = [], [], []
-
-    checkpointer = ModelCheckpoint(Path(experiment_dir) / 'checkpoints', 'checkpoint',
-                                   save_interval=1, n_saved=config['epochs'])
-    trainer.add_event_handler(Events.EPOCH_COMPLETED, checkpointer, {'model': model})
+    try:
+        checkpointer = ModelCheckpoint(Path(experiment_dir) / 'checkpoints', 'checkpoint',
+                                       save_interval=1, n_saved=config['epochs'],
+                                       require_empty=not config['clobber'])
+        trainer.add_event_handler(Events.EPOCH_COMPLETED, checkpointer, {'model': model})
+    except ValueError:
+        logger.warning("Unable to save checkpoints - either delete old models or pass 'clobber = True' in config.")
 
     @trainer.on(Events.ITERATION_COMPLETED)
     def log_training_loss(engine):
