@@ -1,9 +1,10 @@
 import click
-import logging
 from pathlib import Path
 from dotenv import find_dotenv, load_dotenv
 from copy import deepcopy
 import yaml
+import torch
+import numpy
 
 from phenotypy.misc.utils import parse_config_ls, init_log
 from phenotypy.misc.math import mrange
@@ -21,6 +22,12 @@ def main(config):
 def line_search(config):
 
     config_dict, params = parse_config_ls(Path(config))
+
+    # Set random seed
+    rs = config_dict.get('seed', 1984)
+    torch.backends.cudnn.deterministic = True
+    torch.manual_seed(rs)
+    numpy.random.seed(rs)
 
     for search_param in sorted(params):
 

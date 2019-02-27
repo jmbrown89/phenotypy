@@ -24,6 +24,7 @@ class Plotter:
     def __init__(self, out_dir, prefix='', save=True, dpi=300, formats=('.svg',), vis=False):
 
         self.out_dir = Path(out_dir)
+        self.out_dir.mkdir(parents=False, exist_ok=True)
         self.prefix = prefix
         self.save = save
         self.dpi = dpi
@@ -68,6 +69,12 @@ class Plotter:
     def plot_confusion(self):
 
         pass
+
+    def plot_activity_length_distribution(self, lengths, activity):
+
+        fig, ax = plt.subplots()
+        sns.distplot(lengths[lengths <= 100.], ax=ax, hist_kws=dict(cumulative=True), kde_kws=dict(cumulative=True))
+        self.savefig(activity)
 
     def plot_activity_frequency(self, count_object):
 

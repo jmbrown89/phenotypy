@@ -119,7 +119,8 @@ class ResNet(nn.Module):
                  sample_size,
                  sample_duration,
                  shortcut_type='B',
-                 num_classes=400):
+                 num_classes=400,
+                 init='xavier'):
         self.inplanes = 64
         super(ResNet, self).__init__()
         self.conv1 = nn.Conv3d(
@@ -147,7 +148,10 @@ class ResNet(nn.Module):
 
         for m in self.modules():
             if isinstance(m, nn.Conv3d):
-                m.weight = nn.init.kaiming_normal_(m.weight, mode='fan_out')
+                if init == 'kaiming':
+                    m.weight = nn.init.kaiming_normal_(m.weight, mode='fan_out')
+                else:
+                    m.weight = nn.init.xavier_normal_(m.weight)
             elif isinstance(m, nn.BatchNorm3d):
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()

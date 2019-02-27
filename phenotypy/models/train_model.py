@@ -3,6 +3,7 @@ import logging
 from pathlib import Path
 from dotenv import find_dotenv, load_dotenv
 import pandas as pd
+import yaml
 
 import torch
 torch.backends.cudnn.benchmark = False
@@ -15,7 +16,6 @@ from ignite.handlers import ModelCheckpoint
 from phenotypy.data.make_dataset import parse_config, create_data_loaders
 from phenotypy.misc.utils import init_log, increment_path
 from phenotypy.models import resnet
-from phenotypy.models.evaluate_model import confusion
 from phenotypy.visualization.plotting import Plotter
 
 
@@ -52,21 +52,28 @@ def train(config_path, experiment_name=None):
     train_plotter = Plotter(experiment_dir, vis=config['visdom'])
     val_plotter = Plotter(experiment_dir, vis=config['visdom'])
 
+    with open(experiment_dir / Path(config_path).name, 'w') as f:
+        config['encoding'] = train_loader.dataset.label_encoding
+        yaml.dump(config, f, default_flow_style=False)
+
     logger.info("Initialising model")
     layers = config['layers']
     model = resnet.resnet[layers](  # https://github.com/facebook/fb.resnet.torch/blob/master/TRAINING.md#shortcuttype
         num_classes=config['no_classes'],
         sample_size=config['transform']['scale'],
-        sample_duration=config['clip_length'])
+        sample_duration=config['clip_length'],
+        init=config.get('weights', 'xavier'))
 
     params = resnet.get_fine_tuning_parameters(model)
-    optimizer = optim.SGD(params, lr=config['lr'], momentum=config['momentum'])
+    optimizer = optim.SGD(params, lr=config['lr'], momentum=config['momentum'], weight_decay=config['weight_decay'])
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2, verbose=True)
+
     loss = F.cross_entropy
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
     trainer = create_supervised_trainer(model, optimizer, loss, device=device, non_blocking=True)
     evaluator = create_supervised_evaluator(model, metrics={'accuracy': Accuracy(), 'loss': Loss(loss)},
                                             device=device, non_blocking=True)
+
     train_loss, val_loss, val_acc = [], [], []
     try:
         checkpointer = ModelCheckpoint(Path(experiment_dir) / 'checkpoints', 'checkpoint',
@@ -91,13 +98,13 @@ def train(config_path, experiment_name=None):
         metrics = evaluator.state.metrics
         avg_accuracy = metrics['accuracy']
         avg_loss = metrics['loss']
+        scheduler.step(avg_loss)
+
         val_acc.append(avg_accuracy)
         val_loss.append(avg_loss)
-
         logger.info("Validation Results - Epoch: {}  Avg accuracy: {:.2f} Avg loss: {:.2f}"
                      .format(engine.state.epoch, avg_accuracy, avg_loss))
         val_plotter.plot_loss_accuracy(engine, avg_accuracy, avg_loss)
-        # val_plotter.plot_confusion(confusion())
 
     trainer.run(train_loader, max_epochs=config['epochs'])
     logger.info("Training complete!")

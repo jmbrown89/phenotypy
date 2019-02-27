@@ -31,14 +31,12 @@ def parse_config(config_file):
         except FileNotFoundError:
             logging.error(f"Unable to create output directory '{out_dir}'. "
                           f"Please specify a valid 'out_dir' entry in your config file")
-
-        config['out_dir'] = str(out_dir)
-
+            exit(1)
     else:
         out_dir = Path.resolve(Path(config_file).parent / config['out_dir'])
         out_dir.mkdir(parents=False, exist_ok=True)
-        config['out_dir'] = str(out_dir)
 
+    config['out_dir'] = str(out_dir)
     return config
 
 

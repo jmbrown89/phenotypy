@@ -5,12 +5,13 @@ from pathlib import Path
 from dotenv import find_dotenv, load_dotenv
 import cv2
 from phenotypy.data.make_dataset import Video
-from phenotypy.misc.dict_tools import *
+from skvideo.io import FFmpegWriter
 
-font = cv2.FONT_HERSHEY_SIMPLEX
+font = cv2.FONT_HERSHEY_COMPLEX
 annot_pos = (10, 25)
 font_scale = 0.7
-font_color = (255, 0, 255)
+true_color = (255, 0, 255)
+pred_color = (255, 255, 0)
 line_type = 2
 
 
@@ -27,30 +28,27 @@ def main(video_path):
     play_video(video_path)
 
 
-def play_video(video_path):
+def play_video(video_path, activity_encoding=None, predicted_labels=None, save_video=None):
     """
-    Plays a video from file with annotations overlaid. Play/pause with 'p' and quit with 'q' (x button does not work).
+    Plays a video from file with annotations overlaid. Play/pause with 'p' and quit with 'q', if save_video=None.
     :param video_path: path to video file to be played
+    :param activity_encoding: dictionary mapping integer labels to activities as strings
+    :param predicted_labels: prediction annotations to overlay (in addition to the true labels)
+    :param save_video: optional file path to which the annotated video can be saved
     """
 
+    video_path = Path(video_path)
     video_obj = Video(video_path)
-    video_obj.encode_labels()
+    video_obj.encode_labels(activity_encoding)
 
     video = video_obj.video
     pause = int(video_obj.fps / 2.)
-    labels = video_obj.frame_labels
-    activities = reverse_dict(video_obj.activity_encoding)
+    true_labels = video_obj.frame_labels
+    activities = video_obj.label_encoding
     collection = video_obj.collection.name if video_obj.collection else 'no source'
     index = 0
 
-    def annotate_frame(frame, annot_text):
-        """
-        Helper function for displaying a frame and its annotation
-        :param frame: the frame as a numpy array
-        :param annot_text: a string to overlay on the frame
-        """
-        cv2.putText(frame, annot_text, annot_pos, font, font_scale, font_color, line_type)
-        cv2.imshow(f'{video_path.name} ({collection})', frame)
+    writer = FFmpegWriter(save_video)
 
     while video.isOpened():
 
@@ -60,27 +58,55 @@ def play_video(video_path):
         if not ret:
             break
 
-        annot_text = activities[labels[index]]
+        try:
+            true_text = activities[true_labels[index]]
+            pred_text = activities[predicted_labels[index]]
+        except IndexError:
+            break
+
         index += 1
 
-        if cv2.waitKey(pause) & key == ord('p'):
+        if cv2.waitKey(pause) & key == ord('p') and not save_video:
 
             while True:
 
                 key2 = cv2.waitKey(1) or 0xff
-                annotate_frame(frame, annot_text)
+                annotate_frame(frame, true_text)
+                annotate_frame(frame, pred_text, 20)
 
                 if key2 == ord('p'):
                     break
 
-        annotate_frame(frame, annot_text)
+        annotate_frame(frame, true_text)
+        annotate_frame(frame, pred_text, 20)
+        cv2.imshow(f'{video_path.name} ({collection})', frame)
+
+        if save_video:
+            writer.writeFrame(frame[..., ::-1])
 
         # Press Q on keyboard to  exit
         if cv2.waitKey(pause) & 0xFF == ord('q'):
             break
 
     video.release()
+    writer.close()
     cv2.destroyAllWindows()
+
+
+def annotate_frame(f, text, y_offset=0):
+    """
+    Helper function for displaying a frame and its annotation
+    :param f: the frame as a numpy array
+    :param text: a string to overlay on the frame
+    :param y_offset: the amount to shift the text overlay in the y-direction
+    """
+
+    cv2.putText(img=f, text=text, org=(annot_pos[0], annot_pos[1] + y_offset),
+                fontFace=font, fontScale=.75, color=[0, 0, 0], lineType=cv2.LINE_AA, thickness=3)
+    cv2.putText(img=f, text=text, org=(annot_pos[0], annot_pos[1] + y_offset),
+                fontFace=font, fontScale=.75, color=pred_color if y_offset else true_color,
+                lineType=cv2.LINE_AA,
+                thickness=2)
 
 
 if __name__ == '__main__':

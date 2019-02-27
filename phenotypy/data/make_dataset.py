@@ -19,6 +19,9 @@ from phenotypy.visualization.plotting import *
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_LABEL_ENCODING = {0: 'drink', 1: 'eat', 2: 'groom', 3: 'hang', 4: 'micromovement', 5: 'rear', 6: 'rest', 7: 'walk'}
+DEFAULT_ACTIVITY_ENCODING = reverse_dict(DEFAULT_LABEL_ENCODING)
+
 
 @click.command()
 @click.argument('config', type=click.Path(exists=True))
@@ -29,17 +32,9 @@ def main(config):
     logger.info('Making dataset from raw data')
 
     config = parse_config(config)
-    # training_data = dataset_from_config(config, name='training')
-    # for i, (clip, target) in enumerate(training_data):
-    #     montage_frames(clip, training_data.label_encoding[target])
-
     train_loader, val_loader = create_data_loaders(config)
-    train_loader.dataset.statistics(plotter=Plotter('../../data/processed', '_'))
-
-    # for inputs, targets in train_loader:
-    #
-    #     for clip, target in zip(inputs, targets.numpy()):
-    #         montage_frames(clip, train_loader.dataset.label_encoding[target])
+    train_loader.dataset.statistics(plotter=Plotter(Path(config['out_dir']) / 'stats', 'train_'))
+    val_loader.dataset.statistics(plotter=Plotter(Path(config['out_dir']) / 'stats', 'val_'))
 
 
 def create_data_loaders(config):
@@ -74,18 +69,19 @@ def dataset_from_config(config, name='training'):
     video_list = pd.read_csv(data_dir / csv_file)['video'].apply(lambda x: data_dir / x).values
     logger.info(f"Found {len(video_list)} videos in '{data_dir}'")
     loader = VideoCollection(video_list, save_dir, config, name=name)
+    loader.sample_clips(config.get('clip_stride', 1.0))
     return loader
 
 
 class VideoCollection(data.Dataset):
 
-    def __init__(self, video_list, processed_dir, config, name='all'):
+    def __init__(self, video_list, processed_dir, config, activity_encoding=DEFAULT_ACTIVITY_ENCODING, name='all'):
         """
         VideoCollection is a lightweight wrapper than loads multiple separate video files into Video objects.
         This wrapper serves to generate frame sequences from raw footage, without breaking them down into frames.
         :param video_list: a list of paths to video files to be loaded into Video objects
         """
-        self.video_list = video_list
+        self.video_list = [Path(v) for v in video_list]
         self.processed_dir = processed_dir
         self.config = config
         self.name = name
@@ -93,9 +89,10 @@ class VideoCollection(data.Dataset):
         self.limit_clips = None if not self.debug or name == 'validation' else config.get('limit_clips', None)
 
         self.video_objects = []
-        self.activity_set = set()
-        self.activity_encoding = dict()
-        self.label_encoding = dict()
+        self.activity_set = set() if not activity_encoding else set(activity_encoding.keys())
+        self.activity_encoding = dict() if not activity_encoding else activity_encoding
+        self.label_encoding = dict() if not activity_encoding else reverse_dict(activity_encoding)
+        self.clips = []
         self.annotations = []
 
         self._create_dataset()
@@ -121,16 +118,10 @@ class VideoCollection(data.Dataset):
         self.activity_encoding = enumerate_dict(tuple(sorted(list(self.activity_set))))
         self.label_encoding = reverse_dict(self.activity_encoding)
         self.no_classes = len(self.activity_encoding)
+        self.height, self.width = self.video_objects[0].height, self.video_objects[0].width
 
         for video in self.video_objects:
             video.encode_labels(self.activity_encoding)
-
-        # Precompute batches with which to train
-        window, stride = self.config['clip_length'], self.config['clip_stride']
-        self.sampler = SlidingWindowSampler(self.video_objects, window=window, stride=stride, limit_clips=self.limit_clips)
-        self.clips = self.sampler.precompute_clips()
-        self.height, self.width = self.video_objects[0].height, self.video_objects[0].width
-        logger.info(f'Clips extracted for {self.name}: {len(self.clips)}')
 
     def _preprocessing(self):
 
@@ -141,6 +132,14 @@ class VideoCollection(data.Dataset):
 
         transforms.append(ToTensor())
         self.spatial_transform = Compose(transforms)
+
+    def sample_clips(self, stride=1.0, testing=False):
+
+        # Pre-compute batches with which to train
+        window = self.config['clip_length']
+        sampler = SlidingWindowSampler(self.video_objects, window=window, stride=stride, limit_clips=self.limit_clips)
+        self.clips = sampler.precompute_clips(testing=testing)
+        return self.clips
 
     def __len__(self):
         """
@@ -186,8 +185,12 @@ class VideoCollection(data.Dataset):
         # Plot activity lengths and frequency of annotations
         raw_annotations = pd.concat([video.raw_annotations for video in self.video_objects], axis=0)
         label_counts = Counter(self.annotations)
-        plotter.plot_activity_length(raw_annotations[raw_annotations['activity'] != 'rest'], unit='frames')
+        plotter.plot_activity_length(raw_annotations[raw_annotations['activity'] != 'rest'], unit='seconds')
         plotter.plot_activity_frequency(label_counts)
+
+        # Plot distribution of activity length
+        for activity in raw_annotations['activity'].unique():
+            plotter.plot_activity_length_distribution(raw_annotations[raw_annotations['activity'] == activity]['seconds'], activity)
 
 
 class Video:
@@ -202,13 +205,13 @@ class Video:
         """
 
         # Initialise class variables
-        self.video_path = video_path
+        self.video_path = Path(video_path)
         self.data_source = data_source
         self.plotter = plotter
 
         self.raw_annotations = pd.DataFrame()
         self.activity_set = set()
-        self.activity_encoding = dict() # str --> numeric
+        self.activity_encoding = dict()  # str --> numeric
         self.label_encoding = dict()  # numeric --> str
 
         self.collection = None
@@ -217,7 +220,7 @@ class Video:
         # Load raw video and annotations
         logger.info(f"Loading video '{video_path}'")
         self.video, self.fps, self.channels, self.frames, self.height, self.width = load_video(video_path)
-        self._load_annotations(video_path)
+        self._load_annotations(self.video_path)
         self.cache = {}
 
     def _load_annotations(self, input_video, annotator=1):
@@ -279,9 +282,7 @@ class Video:
                            f" (opened = {self.video.isOpened()})")
             self.video.set(cv2.CAP_PROP_POS_FRAMES, idx - 1)
             self.video.set(cv2.CAP_PROP_POS_FRAMES, idx)
-            # self.video.release()
-            # self.video, self.fps, self.channels, self.frames, self.height, self.width = load_video(self.video_path)
-            # self.video.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            self.video.set(cv2.CAP_PROP_POS_FRAMES, idx)
             res, frame = self.video.read()
 
         if not res:
@@ -306,7 +307,8 @@ class Video:
         """
 
         if self.collection is None:
-            logger.error("Video must be part of a VideoCollection object in order to encode labels.")
+            logger.warning("Video must be part of a VideoCollection object in order to maintain label consistency "
+                           "across videos!")
         else:
             # logging.info(f"'{self.video_path.name}' using labels from collection '{self.collection.name}'")
             if encoding != self.collection.activity_encoding:
