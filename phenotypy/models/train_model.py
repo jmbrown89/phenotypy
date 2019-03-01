@@ -65,9 +65,14 @@ def train(config_path, experiment_name=None):
         init=config.get('weights', 'xavier'))
 
     params = resnet.get_fine_tuning_parameters(model)
-    optimizer = optim.SGD(params, lr=config['lr'], momentum=config['momentum'], weight_decay=config['weight_decay'])
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2, verbose=True)
+    solver = config.get('solver', 'sgd').lower()
 
+    if 'rms' in solver:
+        optimizer = optim.RMSprop(params, lr=config['lr'], momentum=config['momentum'], weight_decay=config['weight_decay'])
+    else:
+        optimizer = optim.SGD(params, lr=config['lr'], momentum=config['momentum'], weight_decay=config['weight_decay'])
+        
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2, verbose=True)
     loss = F.cross_entropy
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     trainer = create_supervised_trainer(model, optimizer, loss, device=device, non_blocking=True)

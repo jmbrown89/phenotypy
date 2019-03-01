@@ -23,7 +23,7 @@ def main(video_path, config_path):
     predict(video_path, config_path)
 
 
-def predict(video_path, config_path, stride=1.0, device='cuda'):
+def predict(video_path, config_path, stride=1.0, device='cuda', save=False):
 
     config = parse_config(Path(config_path))
     config['clip_length'] = 16
@@ -47,7 +47,16 @@ def predict(video_path, config_path, stride=1.0, device='cuda'):
     y_pred = np.argmax(np.vstack(outputs), axis=1)
     pred_frames = window_label_to_frames(y_pred, size=config['clip_length'])
     pd.DataFrame(pd.Series(y_pred, name='label')).to_csv(save_dir / 'prediction.csv')
-    play_video(video_path, dataset.activity_encoding, predicted_labels=pred_frames, save_video=save_dir / 'prediction.mp4')
+
+    if save:
+        play_video(video_path, dataset.activity_encoding, predicted_labels=pred_frames, save_video=save_dir / 'prediction.mp4')
+
+    return true_frames, pred_frames
+
+
+def stride_label_to_frames(arr, size=16, stride=0.5):
+
+    pass
 
 
 def window_label_to_frames(arr, size=16):
@@ -56,7 +65,7 @@ def window_label_to_frames(arr, size=16):
     for label in arr:
         frame_labels.extend([label] * size)
 
-    return frame_labels
+    return np.asarray(frame_labels)
 
 
 if __name__ == '__main__':
