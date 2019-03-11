@@ -52,7 +52,7 @@ class Phenotypy(object):
         parser = ArgumentParser(description='Train a new model for HCA using a custom configuration file')
 
         parser.add_argument('-c', '--config', help='Configuration file', dest='config', required=True)
-        parser.add_argument('--cv', 'cv', help='Run a cross-validation', action='store_true', dest='cv', default=True)
+        parser.add_argument('--cv', help='Run a cross-validation', action='store_true', dest='cv', default=False)
         parser.add_argument('--search', help='Perform line search', action='store_true', dest='search', default=False)
         args = parser.parse_args(sys.argv[2:])
 
