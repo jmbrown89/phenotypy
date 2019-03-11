@@ -3,10 +3,33 @@ from pathlib import Path
 import logging
 
 
-def init_log(out_path):
+import os
+import time
+import datetime
+import logging
 
-    log_fmt = '%(asctime)s, %(name)s, %(levelname)s: %(message)s'
-    logging.basicConfig(level=logging.INFO, format=log_fmt, filename=out_path, filemode='w')
+loggers = {}
+log_fmt = '%(asctime)s, %(name)s, %(levelname)s: %(message)s'
+
+
+def get_logger(name, out_path=None):
+
+    if loggers.get(name):
+        return loggers.get(name)
+    else:
+        logger = logging.getLogger(name)
+        logger.setLevel(logging.DEBUG)
+        handler = logging.FileHandler(out_path)
+        formatter = logging.Formatter(log_fmt)
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        loggers[name] = logger
+        return logger
+
+
+# def init_log(out_path):
+#
+#     logging.basicConfig(level=logging.INFO, format=log_fmt, filename=out_path, filemode='w')
 
 
 def increment_path(directory, name_pattern):

@@ -13,7 +13,7 @@ from ignite.metrics import Accuracy, Loss
 from ignite.handlers import ModelCheckpoint
 
 from phenotypy.data.make_dataset import parse_config, create_data_loaders
-from phenotypy.misc.utils import init_log, get_experiment_dir
+from phenotypy.misc.utils import get_logger, get_experiment_dir
 from phenotypy.models import resnet
 from phenotypy.visualization.plotting import Plotter
 
@@ -44,7 +44,7 @@ def cross_validate(config_path):
         print("Please specify a valid CSV file for cross-validation.")
         exit(1)
     except FileNotFoundError:
-        print(f"Cross-validation file not found in {data_dir}")
+        print(f"Cross-validation file '{cv_file}' not found in {data_dir}.")
         exit(1)
 
     cv_dir.mkdir(parents=False, exist_ok=config['clobber'])
@@ -56,6 +56,7 @@ def cross_validate(config_path):
         config_path = (out_dir / f'split_{validation}').with_suffix('.yaml')
 
         if config_path.exists() and (out_dir / f'split_{validation}' / 'final_model.pth').exists():
+            print(f'CV split {validation} already complete. Skipping...')
             continue
 
         train_list = [video_list[training] for training in range(len(video_list)) if training != validation]
@@ -88,15 +89,13 @@ def train(config_path, experiment_name=None):
     if device == 'cuda':
         torch.cuda.manual_seed(seed)
 
-    logger = logging.getLogger(experiment_name)
-
     if not experiment_name:
         experiment_name = Path(config_path).stem
 
     experiment_dir = get_experiment_dir(config, experiment_name)
     log_file = (experiment_dir / experiment_name).with_suffix('.log')
     print(f"Logging to '{log_file}'")
-    init_log(log_file)
+    logger = get_logger(experiment_name, log_file)
     logger.info('Training started')
 
     config['experiment_dir'] = str(experiment_dir)
