@@ -4,7 +4,7 @@ from pkg_resources import get_distribution, DistributionNotFound
 from argparse import ArgumentParser
 
 from phenotypy.misc.utils import parse_config, parse_config_ls
-from phenotypy.models.train_model import train
+from phenotypy.models.train_model import train, cross_validate
 
 try:
     __version__ = get_distribution('phenotypy').version
@@ -52,6 +52,7 @@ class Phenotypy(object):
         parser = ArgumentParser(description='Train a new model for HCA using a custom configuration file')
 
         parser.add_argument('-c', '--config', help='Configuration file', dest='config', required=True)
+        parser.add_argument('--cv', 'cv', help='Run a cross-validation', action='store_true', dest='cv', default=True)
         parser.add_argument('--search', help='Perform line search', action='store_true', dest='search', default=False)
         args = parser.parse_args(sys.argv[2:])
 
@@ -60,7 +61,7 @@ class Phenotypy(object):
             line_search(args.config)
         else:
             from phenotypy.models.train_model import train
-            train(args.config)
+            train(args.config) if not args.cv else cross_validate(args.config)
 
 
 def initialize():
