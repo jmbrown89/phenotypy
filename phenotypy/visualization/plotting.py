@@ -4,6 +4,7 @@ import seaborn as sns
 import pandas as pd
 from pathlib import Path
 from phenotypy.misc.math import *
+from PIL import Image
 
 try:
     import visdom
@@ -117,13 +118,12 @@ class Plotter:
         self.savefig(f'activity_length_{unit}')
 
 
-def montage_frames(frame_list, title):
+def montage_frames(frame_list, outfile):
 
     frame_array = np.asarray(frame_list)
 
     if frame_array.shape[-1] != 3:
         frame_array = frame_array.transpose((1, 2, 3, 0))
 
-    plt.imshow(np.hstack(frame_array))
-    plt.title(title)
-    plt.show()
+    Image.fromarray(np.hstack(frame_array * 255.).astype('uint8')).save(outfile)
+

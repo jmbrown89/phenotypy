@@ -7,6 +7,7 @@ from collections import Counter
 import cv2
 import numpy as np
 import pandas as pd
+from random import choice
 import torch
 import torch.utils.data as data
 
@@ -39,8 +40,8 @@ def main(config):
 
 def create_data_loaders(config):
 
-    training_data = dataset_from_config(config, name='training')
-    validation_data = dataset_from_config(config, name='validation')
+    training_data = dataset_from_config(config, name='training', n_examples=10)
+    validation_data = dataset_from_config(config, name='validation', n_examples=5)
 
     train_loader = data.DataLoader(training_data,
                                    batch_size=config['batch_size'],
@@ -61,15 +62,22 @@ def create_data_loaders(config):
     return train_loader, validation_loader
 
 
-def dataset_from_config(config, name='training'):
+def dataset_from_config(config, name='training', n_examples=5):
 
-    data_dir, save_dir = Path(config['data_dir']), Path(config['out_dir'])
+    data_dir, save_dir, exp_dir = Path(config['data_dir']), Path(config['out_dir']), Path(config['experiment_dir'])
     csv_file = config[f'{name}_csv']
 
     video_list = pd.read_csv(data_dir / csv_file)['video'].apply(lambda x: data_dir / x).values
     logger.info(f"Found {len(video_list)} videos in '{data_dir}'")
     loader = VideoCollection(video_list, save_dir, config, name=name)
     loader.sample_clips(config.get('clip_stride', 1.0))
+
+    examples_dir = exp_dir / 'examples'
+    examples_dir.mkdir(exist_ok=True)
+    for i in range(n_examples):
+        index = choice(list(range(0, len(loader))))
+        montage_frames(loader[index][0], examples_dir / f'{name}_example_{i}.png')
+
     return loader
 
 
@@ -84,6 +92,10 @@ class VideoCollection(data.Dataset):
         self.video_list = [Path(v) for v in video_list]
         self.processed_dir = processed_dir
         self.config = config
+        self.augmentation = []
+        for k in ['rotate', 'translate', 'scale', 'shear']:
+            self.augmentation.append(self.config['transform'].get(k, 0))
+
         self.name = name
         self.debug = config.get('debug', False)
         self.limit_clips = None if not self.debug or name == 'validation' else config.get('limit_clips', None)
@@ -125,12 +137,16 @@ class VideoCollection(data.Dataset):
 
     def _preprocessing(self):
 
-        transforms = [ToPIL(), Scale((128, 128))]
+        transforms = [ToPIL()]
 
         if self.name == 'training':
-            transforms.append(RandomHorizontalFlip())  # TODO add more augmentation with config options
+            transforms.append(RandomAffine(*self.augmentation))
+            transforms.append(RandomHorizontalFlip())
+            transforms.append(ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2))
 
+        transforms.append(Scale((self.config['transform']['resize'], self.config['transform']['resize'])))
         transforms.append(ToTensor())
+
         self.spatial_transform = Compose(transforms)
 
     def sample_clips(self, stride=1.0, testing=False):
@@ -140,6 +156,13 @@ class VideoCollection(data.Dataset):
         sampler = SlidingWindowSampler(self.video_objects, window=window, stride=stride, limit_clips=self.limit_clips)
         self.clips = sampler.precompute_clips(testing=testing)
         return self.clips
+
+    def get_class_weights(self):
+
+        labels = [self.activity_encoding[x] for x in self.annotations]
+        counter = Counter(labels)
+        majority = max(counter.values())
+        return {cls: round(float(majority) / float(count), 2) for cls, count in counter.items()}
 
     def __len__(self):
         """

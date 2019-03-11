@@ -1,53 +1,105 @@
 import click
 import logging
-from pathlib import Path
+from pathlib import Path, PurePath
 from dotenv import find_dotenv, load_dotenv
 import pandas as pd
 import yaml
+import numpy as np
 
 import torch
-torch.backends.cudnn.benchmark = False
 from torch import optim
-import torch.nn.functional as F
 from ignite.engine import Events, create_supervised_trainer, create_supervised_evaluator
 from ignite.metrics import Accuracy, Loss
 from ignite.handlers import ModelCheckpoint
 
 from phenotypy.data.make_dataset import parse_config, create_data_loaders
-from phenotypy.misc.utils import init_log, increment_path
+from phenotypy.misc.utils import init_log, get_experiment_dir
 from phenotypy.models import resnet
 from phenotypy.visualization.plotting import Plotter
 
 
 @click.command()
 @click.argument('config', type=click.Path(exists=True))
-def main(config):
+@click.option('--cv', is_flag=True)
+def main(config, cv):
     """ Runs training based on the provided config file.
     """
-    train(config)
+    cross_validate(config) if cv else train(config)
+
+
+def cross_validate(config_path):
+
+    config = parse_config(Path(config_path))
+    out_dir = Path(config['out_dir'])
+    data_dir = Path(config['data_dir'])
+    cv_dir = data_dir / 'cross_validation'
+    cv_file = config.get('cross_validation', None)
+
+    try:
+        cross_val_path = data_dir / cv_file
+        if not Path(cross_val_path).exists():
+            raise FileNotFoundError()
+
+    except TypeError:
+        print("Please specify a valid CSV file for cross-validation.")
+        exit(1)
+    except FileNotFoundError:
+        print(f"Cross-validation file not found in {data_dir}")
+        exit(1)
+
+    cv_dir.mkdir(parents=False, exist_ok=config['clobber'])
+
+    video_list = pd.read_csv(data_dir / cross_val_path)['video'].apply(lambda x: data_dir / x).values
+
+    for validation in range(len(video_list)):
+
+        config_path = (out_dir / f'split_{validation}').with_suffix('.yaml')
+
+        if config_path.exists() and (out_dir / f'split_{validation}' / 'final_model.pth').exists():
+            continue
+
+        train_list = [video_list[training] for training in range(len(video_list)) if training != validation]
+        validation_list = [video_list[validation]]
+
+        train_csv = cv_dir / f'training_{validation}.csv'
+        val_csv = cv_dir / f'validation_{validation}.csv'
+
+        config['training_csv'] = str(Path(*train_csv.parts[-2:]))
+        config['validation_csv'] = str(Path(*val_csv.parts[-2:]))
+        pd.DataFrame(pd.Series(train_list, name='video')).to_csv(train_csv)
+        pd.DataFrame(pd.Series(validation_list, name='video')).to_csv(val_csv)
+
+        with open(config_path, 'w') as conf:
+            yaml.dump(config, conf, default_flow_style=False)
+
+        train(config_path)
 
 
 def train(config_path, experiment_name=None):
 
     config = parse_config(Path(config_path))
-    logger = logging.getLogger(__name__)
+    seed = config.get('seed', 1984)
+
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+
+    if device == 'cuda':
+        torch.cuda.manual_seed(seed)
+
+    logger = logging.getLogger(experiment_name)
 
     if not experiment_name:
         experiment_name = Path(config_path).stem
 
-    try:
-        experiment_dir = Path(config['out_dir']) / experiment_name
-        experiment_dir.mkdir(parents=False, exist_ok=config.get('clobber', False))
-    except FileExistsError:
-        experiment_dir = increment_path(Path(config['out_dir']), experiment_name + '_({})')
-        experiment_dir.mkdir(parents=False, exist_ok=False)
-        print(f"Warning: experiment '{experiment_name}' already exists!")
-
+    experiment_dir = get_experiment_dir(config, experiment_name)
     log_file = (experiment_dir / experiment_name).with_suffix('.log')
     print(f"Logging to '{log_file}'")
     init_log(log_file)
     logger.info('Training started')
 
+    config['experiment_dir'] = str(experiment_dir)
     train_loader, val_loader = create_data_loaders(config)
     train_plotter = Plotter(experiment_dir, vis=config['visdom'])
     val_plotter = Plotter(experiment_dir, vis=config['visdom'])
@@ -60,7 +112,7 @@ def train(config_path, experiment_name=None):
     layers = config['layers']
     model = resnet.resnet[layers](  # https://github.com/facebook/fb.resnet.torch/blob/master/TRAINING.md#shortcuttype
         num_classes=config['no_classes'],
-        sample_size=config['transform']['scale'],
+        sample_size=config['transform']['resize'],
         sample_duration=config['clip_length'],
         init=config.get('weights', 'xavier'))
 
@@ -71,10 +123,13 @@ def train(config_path, experiment_name=None):
         optimizer = optim.RMSprop(params, lr=config['lr'], momentum=config['momentum'], weight_decay=config['weight_decay'])
     else:
         optimizer = optim.SGD(params, lr=config['lr'], momentum=config['momentum'], weight_decay=config['weight_decay'])
-        
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2, verbose=True)
-    loss = F.cross_entropy
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2, verbose=True)
+
+    class_weights = train_loader.dataset.get_class_weights()
+    logger.info(f'Using class weights: {class_weights}')
+    weight_tensor = torch.tensor([class_weights[i] for i in sorted(class_weights.keys())]).to(device)
+    loss = torch.nn.CrossEntropyLoss(weight=weight_tensor)
     trainer = create_supervised_trainer(model, optimizer, loss, device=device, non_blocking=True)
     evaluator = create_supervised_evaluator(model, metrics={'accuracy': Accuracy(), 'loss': Loss(loss)},
                                             device=device, non_blocking=True)
@@ -90,7 +145,9 @@ def train(config_path, experiment_name=None):
 
     @trainer.on(Events.ITERATION_COMPLETED)
     def log_training_loss(engine):
+
         iteration = (engine.state.iteration - 1) % len(train_loader) + 1
+
         if iteration % config['log_interval'] == 0:
             logger.info("Epoch[{}] Iteration[{}/{}] Loss: {:.2f}"
                         .format(engine.state.epoch, iteration, len(train_loader), engine.state.output))
@@ -103,7 +160,7 @@ def train(config_path, experiment_name=None):
         metrics = evaluator.state.metrics
         avg_accuracy = metrics['accuracy']
         avg_loss = metrics['loss']
-        scheduler.step(avg_loss)
+        # scheduler.step(avg_loss)
 
         val_acc.append(avg_accuracy)
         val_loss.append(avg_loss)

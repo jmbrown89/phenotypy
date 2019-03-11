@@ -23,12 +23,6 @@ def line_search(config):
 
     config_dict, params = parse_config_ls(Path(config))
 
-    # Set random seed
-    rs = config_dict.get('seed', 1984)
-    torch.backends.cudnn.deterministic = True
-    torch.manual_seed(rs)
-    numpy.random.seed(rs)
-
     for search_param in sorted(params):
 
         search_config = deepcopy(config_dict)

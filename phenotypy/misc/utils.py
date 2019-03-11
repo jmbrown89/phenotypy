@@ -45,3 +45,16 @@ def parse_config_ls(config_file):
     config = parse_config(config_file)
     params = [key for key, value in config.items() if isinstance(value, list)]
     return config, params
+
+
+def get_experiment_dir(config, experiment_name):
+
+    try:
+        experiment_dir = Path(config['out_dir']) / experiment_name
+        experiment_dir.mkdir(parents=False, exist_ok=config.get('clobber', False))
+    except FileExistsError:
+        experiment_dir = increment_path(Path(config['out_dir']), experiment_name + '_({})')
+        experiment_dir.mkdir(parents=False, exist_ok=False)
+        print(f"Warning: experiment '{experiment_name}' already exists!")
+
+    return experiment_dir

@@ -5,6 +5,9 @@ import collections
 import numpy as np
 import torch
 from PIL import Image, ImageOps
+from torchvision.transforms import functional as F, Lambda
+
+
 try:
     import accimage
 except ImportError:
@@ -15,7 +18,8 @@ Full credit goes to https://github.com/kenshohara/3D-ResNets-PyTorch for this co
 Paper: http://openaccess.thecvf.com/content_ICCV_2017_workshops/papers/w44/Hara_Learning_Spatio-Temporal_Features_ICCV_2017_paper.pdf
 """
 
-__all__ = ['Compose', 'ToPIL', 'ToTensor', 'Normalize', 'Scale', 'CenterCrop', 'RandomHorizontalFlip', 'MultiScaleRandomCrop']
+__all__ = ['Compose', 'ToPIL', 'ToTensor', 'Normalize', 'Scale', 'CenterCrop', 'RandomHorizontalFlip', 'RandomAffine',
+           'MultiScaleRandomCrop', 'ColorJitter']
 
 
 class Compose(object):
@@ -183,6 +187,168 @@ class Scale(object):
 
     def randomize_parameters(self):
         pass
+
+
+class RandomAffine(object):
+    """Random affine transformation of the image keeping center invariant
+    """
+
+    def __init__(self, rotate, translate=None, scale=None, shear=None, resample=False, fillcolor=0, img_size=(128, 128)):
+        if isinstance(rotate, numbers.Number):
+            if rotate < 0:
+                raise ValueError("If degrees is a single number, it must be positive.")
+            self.rotation = (-rotate, rotate)
+        else:
+            assert isinstance(rotate, (tuple, list)) and len(rotate) == 2, \
+                "degrees should be a list or tuple and it must be of length 2."
+            self.rotation = rotate
+
+        if translate is not None:
+            assert isinstance(translate, (tuple, list)) and len(translate) == 2, \
+                "translate should be a list or tuple and it must be of length 2."
+            for t in translate:
+                if not (0.0 <= t <= 1.0):
+                    raise ValueError("translation values should be between 0 and 1")
+        self.translation = translate
+
+        if scale is not None:
+            assert isinstance(scale, (tuple, list)) and len(scale) == 2, \
+                "scale should be a list or tuple and it must be of length 2."
+            for s in scale:
+                if s <= 0:
+                    raise ValueError("scale values should be positive")
+        self.scaling = scale
+
+        if shear is not None:
+            if isinstance(shear, numbers.Number):
+                if shear < 0:
+                    raise ValueError("If shear is a single number, it must be positive.")
+                self.shearing = (-shear, shear)
+            else:
+                assert isinstance(shear, (tuple, list)) and len(shear) == 2, \
+                    "shear should be a list or tuple and it must be of length 2."
+                self.shearing = shear
+        else:
+            self.shear = shear
+
+        self.resample = resample
+        self.fillcolor = fillcolor
+        self.img_size = img_size
+        self.current_parameters = []
+
+    def randomize_parameters(self):
+        """Randomize parameters for affine transformation
+        """
+        angle = random.uniform(self.rotation[0], self.rotation[1])
+        if self.translation is not None:
+            max_dx = self.translation[0] * self.img_size[0]
+            max_dy = self.translation[1] * self.img_size[1]
+            translate = (np.round(random.uniform(-max_dx, max_dx)),
+                         np.round(random.uniform(-max_dy, max_dy)))
+        else:
+            translate = (0, 0)
+
+        if self.scaling is not None:
+            scale = random.uniform(self.scaling[0], self.scaling[1])
+        else:
+            scale = 1.0
+
+        if self.shearing is not None:
+            shear = random.uniform(self.shearing[0], self.shearing[1])
+        else:
+            shear = 0.0
+
+        self.current_parameters = [angle, translate, scale, shear]
+
+    def __call__(self, img):
+        """
+            img (PIL Image): Image to be transformed.
+
+        Returns:
+            PIL Image: Affine transformed image.
+        """
+        return F.affine(img, *self.current_parameters, resample=self.resample, fillcolor=self.fillcolor)
+
+
+class ColorJitter(object):
+    """Randomly change the brightness, contrast and saturation of an image.
+    Args:
+        brightness (float or tuple of float (min, max)): How much to jitter brightness.
+            brightness_factor is chosen uniformly from [max(0, 1 - brightness), 1 + brightness]
+            or the given [min, max]. Should be non negative numbers.
+        contrast (float or tuple of float (min, max)): How much to jitter contrast.
+            contrast_factor is chosen uniformly from [max(0, 1 - contrast), 1 + contrast]
+            or the given [min, max]. Should be non negative numbers.
+        saturation (float or tuple of float (min, max)): How much to jitter saturation.
+            saturation_factor is chosen uniformly from [max(0, 1 - saturation), 1 + saturation]
+            or the given [min, max]. Should be non negative numbers.
+        hue (float or tuple of float (min, max)): How much to jitter hue.
+            hue_factor is chosen uniformly from [-hue, hue] or the given [min, max].
+            Should have 0<= hue <= 0.5 or -0.5 <= min <= max <= 0.5.
+    """
+    def __init__(self, brightness=0, contrast=0, saturation=0, hue=0):
+        self.brightness = self._check_input(brightness, 'brightness')
+        self.contrast = self._check_input(contrast, 'contrast')
+        self.saturation = self._check_input(saturation, 'saturation')
+        self.hue = self._check_input(hue, 'hue', center=0, bound=(-0.5, 0.5),
+                                     clip_first_on_zero=False)
+        self.current_transform = None
+
+    def _check_input(self, value, name, center=1, bound=(0, float('inf')), clip_first_on_zero=True):
+        if isinstance(value, numbers.Number):
+            if value < 0:
+                raise ValueError("If {} is a single number, it must be non negative.".format(name))
+            value = [center - value, center + value]
+            if clip_first_on_zero:
+                value[0] = max(value[0], 0)
+        elif isinstance(value, (tuple, list)) and len(value) == 2:
+            if not bound[0] <= value[0] <= value[1] <= bound[1]:
+                raise ValueError("{} values should be between {}".format(name, bound))
+        else:
+            raise TypeError("{} should be a single number or a list/tuple with lenght 2.".format(name))
+
+        # if value is 0 or (1., 1.) for brightness/contrast/saturation
+        # or (0., 0.) for hue, do nothing
+        if value[0] == value[1] == center:
+            value = None
+        return value
+
+    def randomize_parameters(self):
+        """Get a randomized transform to be applied on image.
+        Arguments are same as that of __init__.
+        Returns:
+            Transform which randomly adjusts brightness, contrast and
+            saturation in a random order.
+        """
+
+        transforms = []
+        if self.brightness is not None:
+            brightness_factor = random.uniform(self.brightness[0], self.brightness[1])
+            transforms.append(Lambda(lambda img: F.adjust_brightness(img, brightness_factor)))
+
+        if self.contrast is not None:
+            contrast_factor = random.uniform(self.contrast[0], self.contrast[1])
+            transforms.append(Lambda(lambda img: F.adjust_contrast(img, contrast_factor)))
+
+        if self.saturation is not None:
+            saturation_factor = random.uniform(self.saturation[0], self.saturation[1])
+            transforms.append(Lambda(lambda img: F.adjust_saturation(img, saturation_factor)))
+
+        if self.hue is not None:
+            hue_factor = random.uniform(self.hue[0], self.hue[1])
+            transforms.append(Lambda(lambda img: F.adjust_hue(img, hue_factor)))
+
+        random.shuffle(transforms)
+        self.current_transform = Compose(transforms)
+
+    def __call__(self, img):
+        """
+        Args:
+            img (PIL Image): Input image.
+        Returns:
+            PIL Image: Color jittered image.
+        """
+        return self.current_transform(img)
 
 
 class CenterCrop(object):
