@@ -4,7 +4,7 @@ import seaborn as sns
 import pandas as pd
 from pathlib import Path
 from phenotypy.misc.math import *
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 try:
     import visdom
@@ -16,6 +16,7 @@ sns.set_style('white')
 plt.rc("font", **{"sans-serif": ["Roboto"]})
 pal = sns.color_palette("colorblind", 8)
 
+pil_font = "/usr/share/fonts/truetype/freefont/FreeMono.ttf"
 
 __all__ = ['Plotter', 'montage_frames']
 
@@ -118,12 +119,18 @@ class Plotter:
         self.savefig(f'activity_length_{unit}')
 
 
-def montage_frames(frame_list, outfile):
+def montage_frames(frame_list, outfile, annot=None):
 
     frame_array = np.asarray(frame_list)
 
     if frame_array.shape[-1] != 3:
         frame_array = frame_array.transpose((1, 2, 3, 0))
 
-    Image.fromarray(np.hstack(frame_array * 255.).astype('uint8')).save(outfile)
+    img = Image.fromarray(np.hstack(frame_array * 255.).astype('uint8'))
 
+    if annot:
+        draw = ImageDraw.Draw(img)
+        font = ImageFont.truetype(pil_font, 64)
+        draw.text((0, 0), annot, (255, 255, 255), font=font)
+
+    img.save(outfile)

@@ -2,6 +2,7 @@
 import click
 import logging
 from pathlib import Path
+from shutil import rmtree
 from dotenv import find_dotenv, load_dotenv
 from collections import Counter
 import cv2
@@ -12,7 +13,7 @@ import torch
 import torch.utils.data as data
 
 from phenotypy.data.loading import load_video
-from phenotypy.data.sampling import SlidingWindowSampler
+from phenotypy.data.sampling import SlidingWindowSampler, SlidingWindowOversampler
 from phenotypy.data.transforms import *
 from phenotypy.misc.dict_tools import *
 from phenotypy.misc.utils import parse_config
@@ -73,9 +74,13 @@ def dataset_from_config(config, name='training', n_examples=5):
 
     examples_dir = exp_dir / 'examples'
     examples_dir.mkdir(exist_ok=True)
+
     for i in range(n_examples):
         index = choice(list(range(0, len(loader))))
-        montage_frames(loader[index][0], examples_dir / f'{name}_example_{i}.png')
+
+        img, label = loader[index]
+        activity = loader.label_encoding[label]
+        montage_frames(loader[index][0], examples_dir / f'{name}_{i}.png', annot=activity)
 
     return loader
 
@@ -152,7 +157,12 @@ class VideoCollection(data.Dataset):
 
         # Pre-compute batches with which to train
         window = self.config['clip_length']
-        sampler = SlidingWindowSampler(self.video_objects, window=window, stride=stride, limit_clips=self.limit_clips)
+        if self.config.get('oversample') and 'train' in self.name:
+            sampler = SlidingWindowOversampler(self.video_objects, window=window,
+                                               stride=stride, limit_clips=self.limit_clips)
+        else:
+            sampler = SlidingWindowSampler(self.video_objects, window=window,
+                                           stride=stride, limit_clips=self.limit_clips)
         self.clips = sampler.precompute_clips(testing=testing)
         return self.clips
 
@@ -177,7 +187,8 @@ class VideoCollection(data.Dataset):
         :return: a 4-dimensional Torch tensor of sampled video frames (channels x frames x rows x cols)
         """
 
-        v_idx, f_idxs, label = self.clips[item]
+        v_idx, start, end, label = self.clips.iloc[item]
+        f_idxs = range(start, end)
         clip = self.video_objects[v_idx].get_frames(f_idxs)
         self.spatial_transform.randomize_parameters()  # once per clip!
 
@@ -273,6 +284,12 @@ class Video:
         self.activity_set = set(self.raw_annotations['activity'].unique())
         self.activity_encoding = enumerate_dict(self.activity_set)
         self.label_encoding = reverse_dict(self.activity_encoding)
+
+    def get_class_weights(self):
+
+        counter = Counter(self.frame_labels)
+        majority = max(counter.values())
+        return {cls: round(float(majority) / float(count), 2) for cls, count in counter.items()}
 
     def get_frames(self, idxs):
         """

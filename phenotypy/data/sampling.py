@@ -14,6 +14,10 @@ class Sampler(object):
         self.idx = 0
         self.logger = logging.getLogger(__name__)
 
+    def precompute_clips(self):
+
+        raise NotImplementedError("Use SlidingWindowSampler or similar.")
+
     def sample_frames(self, v_index):
 
         raise NotImplementedError("Use SlidingWindowSampler or similar.")
@@ -34,8 +38,6 @@ class SlidingWindowSampler(Sampler):
         clips = []
         for v_index, video in enumerate(self.video_objects):
 
-            self.logger.info(f"Extracting batches from video '{video.video_path.stem}',"
-                             f" which has {video.frames} frames")
             self.idx = 0
 
             sample = True
@@ -52,9 +54,8 @@ class SlidingWindowSampler(Sampler):
                     unique = list(set(labels))
 
                     if len(unique) == 1 or testing:
-
                         annot = labels if testing else labels[0]
-                        clips.append((v_index, idxs, annot))
+                        clips.append((v_index, idxs[0], idxs[-1], annot))
                         break  # no need for more attempts
                     else:
                         continue
@@ -62,7 +63,7 @@ class SlidingWindowSampler(Sampler):
                 if self.limit_clips and len(clips) >= self.limit_clips:
                     return clips
 
-        return clips
+        return pd.DataFrame(clips, columns=['vidx', 'start', 'end', 'label'])
 
     def sample_frames(self, video):
 
@@ -78,6 +79,30 @@ class SlidingWindowSampler(Sampler):
             self.idx += self.window
 
         return idxs, annot_window
+
+
+class SlidingWindowOversampler(SlidingWindowSampler):
+
+    def __init__(self, video_objects, window=8, stride=1.0, limit_clips=None):
+
+        SlidingWindowSampler.__init__(self, video_objects, window, stride, limit_clips)
+
+    def precompute_clips(self, testing=False):
+
+        # Sample clips in the same way as
+        clips = super().precompute_clips(testing)
+
+        if testing:
+            return clips
+
+        # Oversample the clips
+        oversampled = []
+        majority_n = max([g.shape[0] for _, g in clips.groupby('label')])
+        for label, clip_group in clips.groupby('label'):
+            ratio = majority_n / clip_group.shape[0]
+            oversampled.append(clip_group.sample(frac=ratio, replace=True))
+
+        return pd.concat(oversampled)
 
 
 if __name__ == '__main__':
