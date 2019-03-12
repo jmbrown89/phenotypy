@@ -16,7 +16,7 @@ sns.set_style('white')
 plt.rc("font", **{"sans-serif": ["Roboto"]})
 pal = sns.color_palette("colorblind", 8)
 
-pil_font = "/usr/share/fonts/truetype/freefont/FreeMono.ttf"
+pil_font = "/usr/share/fonts/truetype/freefont/DejaVuSans.ttf"
 
 __all__ = ['Plotter', 'montage_frames']
 
@@ -130,7 +130,7 @@ def montage_frames(frame_list, outfile, annot=None):
 
     if annot:
         draw = ImageDraw.Draw(img)
-        font = ImageFont.truetype(pil_font, 64)
+        font = ImageFont.load("arial.pil")  #ImageFont.truetype(pil_font, 64)
         draw.text((0, 0), annot, (255, 255, 255), font=font)
 
     img.save(outfile)
