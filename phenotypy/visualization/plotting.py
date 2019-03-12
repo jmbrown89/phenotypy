@@ -130,7 +130,7 @@ def montage_frames(frame_list, outfile, annot=None):
 
     if annot:
         draw = ImageDraw.Draw(img)
-        font = ImageFont.load("arial.pil")  #ImageFont.truetype(pil_font, 64)
+        font = ImageFont.truetype(pil_font, 64)
         draw.text((0, 0), annot, (255, 255, 255), font=font)
 
     img.save(outfile)
