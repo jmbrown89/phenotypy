@@ -120,14 +120,19 @@ def train(config_path, experiment_name=None):
 
     if 'rms' in solver:
         optimizer = optim.RMSprop(params, lr=config['lr'], momentum=config['momentum'], weight_decay=config['weight_decay'])
-    else:
+    elif 'sgd' in solver:
         optimizer = optim.SGD(params, lr=config['lr'], momentum=config['momentum'], weight_decay=config['weight_decay'])
+    else:
+        optimizer = optim.Adam(params, amsgrad=True)
 
     # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2, verbose=True)
 
-    class_weights = train_loader.dataset.get_class_weights()
-    logger.info(f'Using class weights: {class_weights}')
-    weight_tensor = torch.tensor([class_weights[i] for i in sorted(class_weights.keys())]).to(device)
+    weight_tensor = None
+    if config.get('class_weights'):
+        class_weights = train_loader.dataset.get_class_weights()
+        logger.info(f'Using class weights: {class_weights}')
+        weight_tensor = torch.tensor([class_weights[i] for i in sorted(class_weights.keys())]).to(device)
+
     loss = torch.nn.CrossEntropyLoss(weight=weight_tensor)
     trainer = create_supervised_trainer(model, optimizer, loss, device=device, non_blocking=True)
     evaluator = create_supervised_evaluator(model, metrics={'accuracy': Accuracy(), 'loss': Loss(loss)},

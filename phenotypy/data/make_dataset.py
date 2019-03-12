@@ -18,7 +18,6 @@ from phenotypy.misc.dict_tools import *
 from phenotypy.misc.utils import parse_config
 from phenotypy.visualization.plotting import *
 
-logger = logging.getLogger(__name__)
 
 DEFAULT_LABEL_ENCODING = {0: 'drink', 1: 'eat', 2: 'groom', 3: 'hang', 4: 'micromovement', 5: 'rear', 6: 'rest', 7: 'walk'}
 DEFAULT_ACTIVITY_ENCODING = reverse_dict(DEFAULT_LABEL_ENCODING)
@@ -30,7 +29,7 @@ def main(config):
     """ Runs data processing scripts to turn raw data from (../raw) into
         cleaned data ready to be analyzed (saved in ../processed).
     """
-    logger.info('Making dataset from raw data')
+    logging.info('Making dataset from raw data')
 
     config = parse_config(config)
     train_loader, val_loader = create_data_loaders(config)
@@ -68,7 +67,7 @@ def dataset_from_config(config, name='training', n_examples=5):
     csv_file = config[f'{name}_csv']
 
     video_list = pd.read_csv(data_dir / csv_file)['video'].apply(lambda x: data_dir / x).values
-    logger.info(f"Found {len(video_list)} videos in '{data_dir}'")
+    logging.info(f"Found {len(video_list)} videos in '{data_dir}'")
     loader = VideoCollection(video_list, save_dir, config, name=name)
     loader.sample_clips(config.get('clip_stride', 1.0))
 
@@ -186,7 +185,7 @@ class VideoCollection(data.Dataset):
             clip = [self.spatial_transform(img) for img in clip]
             clip = torch.stack(clip, 0).permute(1, 0, 2, 3)
         except TypeError:
-            logger.critical(f"Unable to load clip at location {f_idxs[0]} - {f_idxs[-1]} "
+            logging.critical(f"Unable to load clip at location {f_idxs[0]} - {f_idxs[-1]} "
                             f"from video '{self.video_objects[v_idx].video_path.name}'")
             exit(1)
 
@@ -200,10 +199,10 @@ class VideoCollection(data.Dataset):
         """
 
         sample_stats = Counter([sample[-1] for sample in self.clips])
-        logger.info(f"Number of videos: {len(self.video_list)}")
-        logger.info(f"Number of annotations (one or more frames): {len(self.annotations)}")
-        logger.info(f"Number of unique activities: {self.no_classes}")
-        logger.info(f"Label distribution of sampled data: {sample_stats}")
+        logging.info(f"Number of videos: {len(self.video_list)}")
+        logging.info(f"Number of annotations (one or more frames): {len(self.annotations)}")
+        logging.info(f"Number of unique activities: {self.no_classes}")
+        logging.info(f"Label distribution of sampled data: {sample_stats}")
 
         # Plot activity lengths and frequency of annotations
         raw_annotations = pd.concat([video.raw_annotations for video in self.video_objects], axis=0)
@@ -241,7 +240,7 @@ class Video:
         self.frame_labels = None
 
         # Load raw video and annotations
-        logger.info(f"Loading video '{video_path}'")
+        logging.info(f"Loading video '{video_path}'")
         self.video, self.fps, self.channels, self.frames, self.height, self.width = load_video(video_path)
         self._load_annotations(self.video_path)
         self.cache = {}
@@ -261,7 +260,7 @@ class Video:
         try:
             assert(Path.is_file(annot_path))
         except AssertionError:
-            logger.warning(f"Unable to locate annotation file for video '{input_video.name}'")
+            logging.warning(f"Unable to locate annotation file for video '{input_video.name}'")
             exit(1)
 
         # logging.info(f"Loading annotations '{annot_path}'")
@@ -301,7 +300,7 @@ class Video:
 
         while not res and attempt < 5:
             attempt += 1
-            logger.warning(f"Failed attempt #{attempt} reading '{self.video_path.name}'"
+            logging.warning(f"Failed attempt #{attempt} reading '{self.video_path.name}'"
                            f" (opened = {self.video.isOpened()})")
             self.video.set(cv2.CAP_PROP_POS_FRAMES, idx - 1)
             self.video.set(cv2.CAP_PROP_POS_FRAMES, idx)
@@ -330,12 +329,12 @@ class Video:
         """
 
         if self.collection is None:
-            logger.warning("Video must be part of a VideoCollection object in order to maintain label consistency "
+            logging.warning("Video must be part of a VideoCollection object in order to maintain label consistency "
                            "across videos!")
         else:
             # logging.info(f"'{self.video_path.name}' using labels from collection '{self.collection.name}'")
             if encoding != self.collection.activity_encoding:
-                logger.error(f"Video activity encoding does not match its collection object f'{self.collection.name}'")
+                logging.error(f"Video activity encoding does not match its collection object f'{self.collection.name}'")
                 exit(1)
 
         if encoding is not None:
