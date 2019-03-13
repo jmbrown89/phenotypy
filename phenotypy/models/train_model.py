@@ -10,10 +10,10 @@ import torch
 from torch import optim
 from ignite.engine import Events, create_supervised_trainer, create_supervised_evaluator
 from ignite.metrics import Accuracy, Loss
-from ignite.handlers import ModelCheckpoint
+from ignite.handlers import ModelCheckpoint, EarlyStopping
 
 from phenotypy.data.make_dataset import parse_config, create_data_loaders
-from phenotypy.misc.utils import get_logger, get_experiment_dir
+from phenotypy.misc.utils import init_log, get_experiment_dir
 from phenotypy.models import resnet
 from phenotypy.visualization.plotting import Plotter
 
@@ -95,8 +95,8 @@ def train(config_path, experiment_name=None):
     experiment_dir = get_experiment_dir(config, experiment_name)
     log_file = (experiment_dir / experiment_name).with_suffix('.log')
     print(f"Logging to '{log_file}'")
-    logger = get_logger(experiment_name, log_file)
-    logger.info('Training started')
+    init_log(log_file)
+    logging.info('Training started')
 
     config['experiment_dir'] = str(experiment_dir)
     train_loader, val_loader = create_data_loaders(config)
@@ -107,7 +107,7 @@ def train(config_path, experiment_name=None):
         config['encoding'] = train_loader.dataset.label_encoding
         yaml.dump(config, f, default_flow_style=False)
 
-    logger.info("Initialising model")
+    logging.info("Initialising model")
     layers = config['layers']
     model = resnet.resnet[layers](  # https://github.com/facebook/fb.resnet.torch/blob/master/TRAINING.md#shortcuttype
         num_classes=config['no_classes'],
@@ -125,18 +125,25 @@ def train(config_path, experiment_name=None):
     else:
         optimizer = optim.Adam(params, amsgrad=True)
 
-    # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2, verbose=True)
+    logging.info(f"Using {optimizer.__class__} solver")
 
     weight_tensor = None
     if config.get('class_weights'):
         class_weights = train_loader.dataset.get_class_weights()
-        logger.info(f'Using class weights: {class_weights}')
+        logging.info(f'Using class weights: {class_weights}')
         weight_tensor = torch.tensor([class_weights[i] for i in sorted(class_weights.keys())]).to(device)
 
+    def score_function(engine):
+        v_loss = engine.state.metrics['loss']
+        return -v_loss
+
+    # Create loss, trainer, evaluator and early stopper objects
     loss = torch.nn.CrossEntropyLoss(weight=weight_tensor)
     trainer = create_supervised_trainer(model, optimizer, loss, device=device, non_blocking=True)
     evaluator = create_supervised_evaluator(model, metrics={'accuracy': Accuracy(), 'loss': Loss(loss)},
                                             device=device, non_blocking=True)
+    stopper = EarlyStopping(5, score_function, trainer)
+    trainer.add_event_handler(Events.COMPLETED, stopper)
 
     train_loss, val_loss, val_acc = [], [], []
     try:
@@ -145,7 +152,7 @@ def train(config_path, experiment_name=None):
                                        require_empty=not config['clobber'])
         trainer.add_event_handler(Events.EPOCH_COMPLETED, checkpointer, {'model': model})
     except ValueError:
-        logger.warning("Unable to save checkpoints - either delete old models or pass 'clobber = True' in config.")
+        logging.warning("Unable to save checkpoints - either delete old models or pass 'clobber = True' in config.")
 
     @trainer.on(Events.ITERATION_COMPLETED)
     def log_training_loss(engine):
@@ -153,7 +160,7 @@ def train(config_path, experiment_name=None):
         iteration = (engine.state.iteration - 1) % len(train_loader) + 1
 
         if iteration % config['log_interval'] == 0:
-            logger.info("Epoch[{}] Iteration[{}/{}] Loss: {:.2f}"
+            logging.info("Epoch[{}] Iteration[{}/{}] Loss: {:.2f}"
                         .format(engine.state.epoch, iteration, len(train_loader), engine.state.output))
             train_plotter.plot_loss(engine)
             train_loss.append(engine.state.output)
@@ -168,12 +175,12 @@ def train(config_path, experiment_name=None):
 
         val_acc.append(avg_accuracy)
         val_loss.append(avg_loss)
-        logger.info("Validation Results - Epoch: {}  Avg accuracy: {:.2f} Avg loss: {:.2f}"
+        logging.info("Validation Results - Epoch: {}  Avg accuracy: {:.2f} Avg loss: {:.2f}"
                      .format(engine.state.epoch, avg_accuracy, avg_loss))
         val_plotter.plot_loss_accuracy(engine, avg_accuracy, avg_loss)
 
     trainer.run(train_loader, max_epochs=config['epochs'])
-    logger.info("Training complete!")
+    logging.info("Training complete!")
 
     # Results
     torch.save(model, str(Path(experiment_dir) / 'final_model.pth'))
@@ -182,7 +189,7 @@ def train(config_path, experiment_name=None):
     results['loss'] = val_loss
     results.to_csv(Path(experiment_dir / 'val_results.csv'))
     pd.DataFrame(pd.Series(train_loss, name='loss')).to_csv(Path(experiment_dir / 'train_results.csv'))
-    logger.info(f"Results saved to '{experiment_dir}'")
+    logging.info(f"Results saved to '{experiment_dir}'")
     return results
 
 

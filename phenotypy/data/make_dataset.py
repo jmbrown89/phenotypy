@@ -158,6 +158,7 @@ class VideoCollection(data.Dataset):
         # Pre-compute batches with which to train
         window = self.config['clip_length']
         if self.config.get('oversample') and 'train' in self.name:
+            logging.info("Training data will be oversampled")
             sampler = SlidingWindowOversampler(self.video_objects, window=window,
                                                stride=stride, limit_clips=self.limit_clips)
         else:
