@@ -36,7 +36,8 @@ def increment_path(directory, name_pattern):
 
 def parse_config(config_file):
 
-    config = yaml.load(open(config_file, 'r').read())
+    f = open(config_file, 'rb').read()
+    config = yaml.load(f, Loader=yaml.SafeLoader)
     config['data_dir'] = str(Path.resolve(Path(config_file).parent / config['data_dir']))
 
     if not config.get('out_dir', None):

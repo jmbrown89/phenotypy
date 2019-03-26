@@ -32,10 +32,13 @@ class SlidingWindowSampler(Sampler):
         self.stride = stride if isinstance(stride, int) else int(round(window * stride))
         self.attempts = 10
         self.limit_clips = limit_clips
+        self.testing = False
 
     def precompute_clips(self, testing=False):
 
         clips = []
+        self.testing = testing
+
         for v_index, video in enumerate(self.video_objects):
 
             self.idx = 0
@@ -73,7 +76,7 @@ class SlidingWindowSampler(Sampler):
         annot_window = video.frame_labels[self.idx:self.idx+self.window]
         idxs = range(self.idx, self.idx + self.window)
 
-        if len(set(annot_window)) <= 1:
+        if len(set(annot_window)) == 1 or self.testing:
             self.idx += self.stride
         else:
             self.idx += self.window

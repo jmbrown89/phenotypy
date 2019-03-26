@@ -48,7 +48,9 @@ def play_video(video_path, activity_encoding=None, predicted_labels=None, save_v
     collection = video_obj.collection.name if video_obj.collection else 'no source'
     index = 0
 
-    writer = FFmpegWriter(save_video)
+    writer = None
+    if save_video:
+        writer = FFmpegWriter(save_video)
 
     while video.isOpened():
 
@@ -58,12 +60,6 @@ def play_video(video_path, activity_encoding=None, predicted_labels=None, save_v
         if not ret:
             break
 
-        try:
-            true_text = activities[true_labels[index]]
-            pred_text = activities[predicted_labels[index]]
-        except IndexError:
-            break
-
         index += 1
 
         if cv2.waitKey(pause) & key == ord('p') and not save_video:
@@ -71,14 +67,12 @@ def play_video(video_path, activity_encoding=None, predicted_labels=None, save_v
             while True:
 
                 key2 = cv2.waitKey(1) or 0xff
-                annotate_frame(frame, true_text)
-                annotate_frame(frame, pred_text, 20)
-
                 if key2 == ord('p'):
                     break
 
-        annotate_frame(frame, true_text)
-        annotate_frame(frame, pred_text, 20)
+        annotate_frame(frame, activities[true_labels[index]])
+        if predicted_labels:
+            annotate_frame(frame, activities[predicted_labels[index]], 20)
         cv2.imshow(f'{video_path.name} ({collection})', frame)
 
         if save_video:
@@ -89,7 +83,8 @@ def play_video(video_path, activity_encoding=None, predicted_labels=None, save_v
             break
 
     video.release()
-    writer.close()
+    if save_video:
+        writer.close()
     cv2.destroyAllWindows()
 
 

@@ -5,7 +5,7 @@ setuptools==40.6.3
 tqdm==4.28.1
 seaborn==0.9.0
 pandas==0.23.4
-python-dotenv==0.10.1
+python-dotenv
 torch==1.0.0
 appdirs
 pyyaml
@@ -14,3 +14,4 @@ opencv-python
 Pillow
 visdom
 scikit-learn
+scikit-video

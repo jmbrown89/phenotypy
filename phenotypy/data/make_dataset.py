@@ -2,7 +2,6 @@
 import click
 import logging
 from pathlib import Path
-from shutil import rmtree
 from dotenv import find_dotenv, load_dotenv
 from collections import Counter
 import cv2
@@ -50,7 +49,6 @@ def create_data_loaders(config):
                                    pin_memory=True,
                                    drop_last=True)
 
-    # TODO: Figure out what was going (and might still be) wrong with this
     # The solution is some combination of batch size > 1, num_workers=0, pin_memory = True, and drop_last = True
     validation_loader = data.DataLoader(validation_data,
                                         batch_size=config['batch_size'],
@@ -62,6 +60,16 @@ def create_data_loaders(config):
     return train_loader, validation_loader
 
 
+def load_single(video_path, config_path, testing=True, batch_size=8, stride=1):
+
+    config = parse_config(Path(config_path))
+    dataset = VideoCollection([video_path], config, name='testing')
+    dataset.sample_clips(stride=stride, testing=testing)
+    loader = data.DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0,
+                             pin_memory=True, drop_last=False)
+    return loader, config
+
+
 def dataset_from_config(config, name='training', n_examples=5):
 
     data_dir, save_dir, exp_dir = Path(config['data_dir']), Path(config['out_dir']), Path(config['experiment_dir'])
@@ -69,7 +77,7 @@ def dataset_from_config(config, name='training', n_examples=5):
 
     video_list = pd.read_csv(data_dir / csv_file)['video'].apply(lambda x: data_dir / x).values
     logging.info(f"Found {len(video_list)} videos in '{data_dir}'")
-    loader = VideoCollection(video_list, save_dir, config, name=name)
+    loader = VideoCollection(video_list, config, name=name, processed_dir=save_dir)
     loader.sample_clips(config.get('clip_stride', 1.0))
 
     examples_dir = exp_dir / 'examples'
@@ -77,7 +85,6 @@ def dataset_from_config(config, name='training', n_examples=5):
 
     for i in range(n_examples):
         index = choice(list(range(0, len(loader))))
-
         img, label = loader[index]
         activity = loader.label_encoding[label]
         montage_frames(loader[index][0], examples_dir / f'{name}_{i}.png', annot=activity)
@@ -87,7 +94,7 @@ def dataset_from_config(config, name='training', n_examples=5):
 
 class VideoCollection(data.Dataset):
 
-    def __init__(self, video_list, processed_dir, config, activity_encoding=DEFAULT_ACTIVITY_ENCODING, name='all'):
+    def __init__(self, video_list, config, activity_encoding=DEFAULT_ACTIVITY_ENCODING, name='all', processed_dir=None):
         """
         VideoCollection is a lightweight wrapper than loads multiple separate video files into Video objects.
         This wrapper serves to generate frame sequences from raw footage, without breaking them down into frames.
@@ -122,7 +129,8 @@ class VideoCollection(data.Dataset):
 
         for video_path in self.video_list:
 
-            video = Video(video_path, plotter=Plotter(self.processed_dir, prefix=video_path.stem + '_'))
+            plotter = Plotter(self.processed_dir, prefix=video_path.stem + '_') if self.processed_dir else None
+            video = Video(video_path, plotter=plotter)
             self.video_objects.append(video)
 
             self.annotations.extend(video.raw_annotations['activity'])
@@ -360,12 +368,12 @@ class Video:
             self.label_encoding = reverse_dict(encoding)
 
         # Produce a dense list of annotations, frame-by-frame
-        labels = np.zeros(shape=(self.raw_annotations.loc[len(self.raw_annotations) - 1]['end']), dtype=int)
+        labels = np.zeros(shape=(self.raw_annotations.loc[len(self.raw_annotations) - 1]['end'] + 1), dtype=int)
 
         for _, row in self.raw_annotations.iterrows():
 
             label = self.activity_encoding[row['activity']]
-            labels[row['start']:row['end']] = [label] * (row['end'] - row['start'])
+            labels[row['start']:row['end'] + 1] = [label] * ((row['end'] - row['start']) + 1)
 
         self.frame_labels = labels
 
