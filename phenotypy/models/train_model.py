@@ -102,6 +102,7 @@ def train(config_path, experiment_name=None):
     train_loader, val_loader = create_data_loaders(config)
     train_plotter = Plotter(experiment_dir, vis=config['visdom'])
     val_plotter = Plotter(experiment_dir, vis=config['visdom'])
+    results = pd.DataFrame()
 
     with open(experiment_dir / Path(config_path).name, 'w') as f:
         config['encoding'] = train_loader.dataset.label_encoding
@@ -133,17 +134,20 @@ def train(config_path, experiment_name=None):
         logging.info(f'Using class weights: {class_weights}')
         weight_tensor = torch.tensor([class_weights[i] for i in sorted(class_weights.keys())]).to(device)
 
-    def score_function(engine):
-        v_loss = engine.state.metrics['loss']
-        return -v_loss
+    def save_results():
+        results = pd.DataFrame()
+        results['accuracy'] = val_acc
+        results['loss'] = val_loss
+        results.to_csv(Path(experiment_dir / 'val_results.csv'))
+        pd.DataFrame(pd.Series(train_loss, name='loss')).to_csv(Path(experiment_dir / 'train_results.csv'))
+        logging.info(f"Results saved to '{experiment_dir}'")
+        return results
 
     # Create loss, trainer, evaluator and early stopper objects
     loss = torch.nn.CrossEntropyLoss(weight=weight_tensor)
     trainer = create_supervised_trainer(model, optimizer, loss, device=device, non_blocking=True)
     evaluator = create_supervised_evaluator(model, metrics={'accuracy': Accuracy(), 'loss': Loss(loss)},
                                             device=device, non_blocking=True)
-    stopper = EarlyStopping(5, score_function, trainer)
-    trainer.add_event_handler(Events.COMPLETED, stopper)
 
     train_loss, val_loss, val_acc = [], [], []
     try:
@@ -161,7 +165,7 @@ def train(config_path, experiment_name=None):
 
         if iteration % config['log_interval'] == 0:
             logging.info("Epoch[{}] Iteration[{}/{}] Loss: {:.2f}"
-                        .format(engine.state.epoch, iteration, len(train_loader), engine.state.output))
+                         .format(engine.state.epoch, iteration, len(train_loader), engine.state.output))
             train_plotter.plot_loss(engine)
             train_loss.append(engine.state.output)
 
@@ -171,26 +175,30 @@ def train(config_path, experiment_name=None):
         metrics = evaluator.state.metrics
         avg_accuracy = metrics['accuracy']
         avg_loss = metrics['loss']
-        # scheduler.step(avg_loss)
-
         val_acc.append(avg_accuracy)
         val_loss.append(avg_loss)
         logging.info("Validation Results - Epoch: {}  Avg accuracy: {:.2f} Avg loss: {:.2f}"
                      .format(engine.state.epoch, avg_accuracy, avg_loss))
         val_plotter.plot_loss_accuracy(engine, avg_accuracy, avg_loss)
+        save_results()
 
-    trainer.run(train_loader, max_epochs=config['epochs'])
+    try:
+        trainer.run(train_loader, max_epochs=config['epochs'])
+    except Exception as e:
+        logging.error(e)
+        logging.error("Caught error, probably ignite error. Emptying CUDA cache...")
+        torch.cuda.empty_cache()
+
     logging.info("Training complete!")
 
     # Results
     torch.save(model, str(Path(experiment_dir) / 'final_model.pth'))
-    results = pd.DataFrame()
-    results['accuracy'] = val_acc
-    results['loss'] = val_loss
-    results.to_csv(Path(experiment_dir / 'val_results.csv'))
-    pd.DataFrame(pd.Series(train_loss, name='loss')).to_csv(Path(experiment_dir / 'train_results.csv'))
-    logging.info(f"Results saved to '{experiment_dir}'")
-    return results
+    save_results()
+
+
+def best_model(val_results):
+
+    best_epoch = val_results['accuracy'].max()
 
 
 if __name__ == '__main__':
