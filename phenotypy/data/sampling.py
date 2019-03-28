@@ -64,7 +64,7 @@ class SlidingWindowSampler(Sampler):
                         continue
 
                 if self.limit_clips and len(clips) >= self.limit_clips:
-                    return clips
+                    return pd.DataFrame(clips, columns=['vidx', 'start', 'end', 'label'])
 
         return pd.DataFrame(clips, columns=['vidx', 'start', 'end', 'label'])
 
