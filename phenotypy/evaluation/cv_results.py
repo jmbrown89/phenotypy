@@ -18,7 +18,7 @@ def cv_results(cv_dir):
 			continue
 		
 		best_epoch = val_results['accuracy'].max()
-		if best_epoch < 0.1:
+		if best_epoch < 0.4:
 			print(f"Ignoring outlier '{split}'")
 			continue
 		accuracy.append(best_epoch)
@@ -29,5 +29,6 @@ def cv_results(cv_dir):
 if __name__ == '__main__':
 
 	results = cv_results(sys.argv[1])
-	print(f"{np.mean(results) * 100:.0f}%, ", f"{np.std(results) * 100:.0f}%")
+	print(results)
+	print(f"{np.mean(results) * 100:.2f}%, ", f"{np.std(results) * 100:.2f}%")
 

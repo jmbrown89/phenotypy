@@ -71,8 +71,13 @@ def play_video(video_path, activity_encoding=None, predicted_labels=None, save_v
                     break
 
         annotate_frame(frame, activities[true_labels[index]])
-        if predicted_labels:
-            annotate_frame(frame, activities[predicted_labels[index]], 20)
+        if predicted_labels is not None:
+
+            try:
+                annotate_frame(frame, activities[predicted_labels[index]], 20)
+            except IndexError:
+                break
+
         cv2.imshow(f'{video_path.name} ({collection})', frame)
 
         if save_video:

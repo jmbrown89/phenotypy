@@ -34,26 +34,30 @@ def increment_path(directory, name_pattern):
             return path
 
 
-def parse_config(config_file):
+def parse_config(config_file, training=True):
 
     f = open(config_file, 'rb').read()
     config = yaml.load(f, Loader=yaml.SafeLoader)
-    config['data_dir'] = str(Path.resolve(Path(config_file).parent / config['data_dir']))
 
-    if not config.get('out_dir', None):
+    if training:
 
-        out_dir = (Path.home() / 'phenotypy_out')
-        try:
-            out_dir.mkdir(parents=False, exist_ok=True)
-        except FileNotFoundError:
-            logging.error(f"Unable to create output directory '{out_dir}'. "
-                          f"Please specify a valid 'out_dir' entry in your config file")
-            exit(1)
-    else:
-        out_dir = Path.resolve(Path(config_file).parent / config['out_dir'])
-        out_dir.mkdir(parents=False, exist_ok=True)
+        config['data_dir'] = str(Path.resolve(Path(config_file).parent / config['data_dir']))
 
-    config['out_dir'] = str(out_dir)
+        if not config.get('out_dir', None):
+
+            out_dir = (Path.home() / 'phenotypy_out')
+            try:
+                out_dir.mkdir(parents=False, exist_ok=False)
+            except FileNotFoundError:
+                logging.error(f"Unable to create output directory '{out_dir}'. "
+                              f"Please specify a valid 'out_dir' entry in your config file")
+                exit(1)
+        else:
+            out_dir = Path.resolve(Path(config_file).parent / config['out_dir'])
+            out_dir.mkdir(parents=False, exist_ok=False)
+
+        config['out_dir'] = str(out_dir)
+
     return config
 
 

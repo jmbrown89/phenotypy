@@ -22,33 +22,39 @@ def main(video_path, model_path, config_path, device):
     predict(video_path, model_path, config_path, device=device)
 
 
-def predict(video_path, model_path, config_path, stride=7, device='cuda', per_frame=True, save_dir='./'):
+def predict(video_path, model_path, config_path, stride=7, device='cuda', per_frame=True, save_dir='./', save_video=False):
 
     # Create a loader for a single video
     print(f"Loading video '{Path(video_path).stem}'")
-    loader, config = load_single(video_path, config_path, testing=per_frame, stride=stride, batch_size=2)
+    loader, config = load_single(video_path, config_path, testing=True, stride=stride, batch_size=1)
 
     # Load the model for evaluation
     model = torch.load(model_path).eval()
     model.to(device)
+    np_file = (Path(save_dir) / Path(video_path).name).with_suffix('.npz')
 
-    dev_str = 'CPU' if device == 'cpu' else 'GPU'
-    print(f"Running inference on {dev_str}")
-    y_preda, y_true = [], []
+    if not np_file.exists():
 
-    for x, y in tqdm(loader):  # TODO make this smarter so that we can restart incomplete runs
+        y_preda, y_true = [], []
 
-        if device == 'cuda':
-            x = x.to(device)
-            output = model(x).detach().to('cpu')
-        else:
-            output = model(x).detach()
+        for x, y in tqdm(loader):  # TODO make this smarter so that we can restart incomplete runs
 
-        y_preda.append(output.numpy())
-        y_true.extend(list(np.hstack(y.numpy())))
+            if device == 'cuda':
+                x = x.to(device)
+                output = model(x).detach().to('cpu')
+            else:
+                output = model(x).detach()
 
-    y_pred = np.vstack(y_preda)
-    y_true = np.asarray(y_true)
+            y_preda.append(torch.softmax(output, 1).numpy())
+            y_true.extend(list(np.hstack(y.numpy())))
+
+        y_preda = np.vstack(y_preda)
+        y_true = np.asarray(y_true)
+        np.savez(np_file, y_preda=y_preda, y_true=y_true)
+
+    else:
+        files = np.load(np_file)
+        y_preda, y_true = files['y_preda'], files['y_true']
 
     if per_frame:
 
@@ -60,18 +66,19 @@ def predict(video_path, model_path, config_path, stride=7, device='cuda', per_fr
                 f'less than or equal to the clip length ({clip_size})')
 
         if stride == clip_size:
-            y_pred = unstrided_labels_to_frames(y_pred, clip_size=clip_size)
+            y_pred, y_preda = unstrided_labels_to_frames(y_preda, clip_size=clip_size)  # TODO check this works
         else:
-            y_pred = strided_labels_to_frames(y_pred, clip_size=clip_size, stride=stride)
+            y_pred, y_preda = strided_labels_to_frames(y_preda, clip_size=clip_size, stride=stride)
+            y_true = np.hstack(loader.dataset.clips.loc[::4]['label'])
 
-        if save_dir:
+        if save_video:
             print("Annotating video")
             save_dir = Path(save_dir)
             pd.DataFrame(pd.Series(y_pred, name='label')).to_csv(save_dir / 'prediction.csv')
             play_video(video_path, loader.dataset.activity_encoding, predicted_labels=y_pred,
-                       save_video=save_dir / 'prediction.mp4')
+                       save_video=save_dir / video_path.with_suffix('.mp4').name)
 
-    return y_true, y_pred
+    return y_true, y_preda
 
 
 def unstrided_labels_to_frames(clip_preds, clip_size=28):
@@ -83,13 +90,14 @@ def unstrided_labels_to_frames(clip_preds, clip_size=28):
     :return: an array containing the frame-level annotations
     """
 
-    clip_preds = np.argmax(clip_preds, axis=1)
+    clip_labels = np.argmax(clip_preds, axis=1)
 
-    frame_labels = []
-    for label in clip_preds:  # annoying that one can't use a list comprehension for this
+    frame_probs, frame_labels = [], []
+    for prob, label in zip(clip_preds, clip_labels):  # annoying that one can't use a list comprehension for this
+        frame_probs.append(np.tile(prob, (clip_size, 1)))
         frame_labels.extend([label] * clip_size)
 
-    return np.asarray(frame_labels)
+    return np.asarray(frame_labels), np.concatenate(frame_probs, axis=0)
 
 
 def strided_labels_to_frames(clip_preds, clip_size=28, stride=1):
@@ -107,12 +115,16 @@ def strided_labels_to_frames(clip_preds, clip_size=28, stride=1):
 
     no_frames = len(overlapping_preds.keys())
     frame_labels = np.zeros(shape=(no_frames,), dtype=int)
+    frame_probs = np.zeros(shape=(no_frames, clip_preds.shape[1]))
 
     for frame, preds in overlapping_preds.items():
         label = np.stack(preds, -1).max(1).argmax()
+        mean_prob = np.mean(np.stack(preds, 0), axis=0)
         frame_labels[frame] = label
+        frame_probs[frame] = mean_prob
 
-    return np.asarray(frame_labels)
+    return frame_labels, frame_probs
+
 
 if __name__ == '__main__':
 

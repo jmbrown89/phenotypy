@@ -1,13 +1,85 @@
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, precision_recall_curve, roc_curve, auc
 import numpy as np
 from collections import defaultdict
 import torch
+from pathlib import Path
+import pandas as pd
 from ignite.metrics.accuracy import Accuracy
+from phenotypy.visualization.plotting import Plotter
 
 
-def mean_accuracy(y_true, y_pred):
+curves = {'pr': precision_recall_curve, 'roc': roc_curve}
 
-    return np.mean(per_class_accuracy(y_true, y_pred))
+
+class Evaluator:
+
+    def __init__(self, out_dir):
+
+        self.out_dir = Path(out_dir)
+        self.plotter = Plotter(self.out_dir / 'plots')
+
+    def auc(self, y_true, y_pred, method='roc'):
+
+        curve = curves.get(method, roc_curve)
+        fpr, tpr, _ = curve(y_true, y_pred)
+        roc_auc = auc(fpr, tpr)
+
+        return fpr, tpr, roc_auc
+
+    def run(self):
+
+        return NotImplementedError("Use a subclass like MultiClassEvaluator")
+
+
+class MultiClassEvaluator(Evaluator):
+
+    """
+    A class that serves to evaluate multi-class classifiers in such as way that
+    various metrics can be recorded and plotted easily.
+    """
+    def __init__(self, out_dir, encoding=None):
+
+        super(MultiClassEvaluator, self).__init__(out_dir)
+        self.encoding = encoding
+        self.roc = defaultdict(list)
+        self.accuracy = []
+        self.legends = []
+
+    def auc(self, y_true, y_pred, method='roc', legend=None):
+
+        if legend:
+            self.legends.append(legend)
+
+        if len(y_true.shape) == 1:
+
+            # Infuriating way to insert columns where there is no data
+            diff = map(str, set(range(0, 8)).difference(set(y_true)))
+            y_true = pd.get_dummies(y_true)
+            y_true = y_true.assign(**dict.fromkeys(diff, 0)).values
+
+        for i, label in self.encoding.items():
+
+            if all(y_true[:, i] == 0):
+                continue
+            fpr, tpr, area = super().auc(y_true[:, i], y_pred[:, i], method=method)
+            self.roc[label].append({'fpr': fpr, 'tpr': tpr, 'area': area})
+
+            # label_str = label if 'micro' not in label else 'micro.'
+            # plt.plot(fpr, tpr, lw=2., label=f'{label_str} (AUC = {roc_auc:.2f})')
+
+    def mean_accuracy(self, y_true, y_pred):
+
+        result = np.mean(per_class_accuracy(y_true, y_pred))
+        self.accuracy.append(result)
+
+    def run(self):
+
+        # Plot
+        for label in self.roc.keys():
+            aucs = [self.roc[label][i]['area'] for i in range(0, len(self.roc[label]))]
+            print(f'{label}: {np.mean(aucs)}')
+
+        self.plotter.plot_multiclass_roc(self.roc, legend=self.legends)
 
 
 def per_class_accuracy(y_true, y_pred):

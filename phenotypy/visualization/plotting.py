@@ -12,8 +12,8 @@ except ImportError:
     raise RuntimeError("No visdom package is found. Please install it with command: \n pip install visdom")
 
 
-sns.set_style('white')
-plt.rc("font", **{"sans-serif": ["Roboto"]})
+import matplotlib as mpl
+mpl.rcParams['font.family'] = 'Roboto'
 pal = sns.color_palette("colorblind", 8)
 
 pil_font = "/usr/share/fonts/truetype/freefont/DejaVuSans.ttf"
@@ -71,6 +71,29 @@ class Plotter:
     def plot_confusion(self):
 
         pass
+
+    def plot_multiclass_roc(self, data, legend=None):
+
+        fig, ax = plt.subplots(nrows=2, ncols=4, figsize=(20, 8))
+        ax = ax.reshape(-1)
+
+        i = 0
+
+        for class_, roc_data in data.items():
+
+            for split, split_data in enumerate(roc_data):
+
+                fpr, tpr, area = split_data['fpr'], split_data['tpr'], split_data['area']
+
+                label = legend[split] if legend is not None else f"Split {split}"
+                ax[i].plot(fpr, tpr, label=f'{label} (AUC = {area:.2f})')
+
+            ax[i].set_title(class_.capitalize())
+            ax[i].legend(prop={'size': 8}, loc='lower right')
+
+            i += 1
+
+        plt.savefig(self.out_dir / 'roc_auc.png', dpi=150)
 
     def plot_activity_length_distribution(self, lengths, activity):
 

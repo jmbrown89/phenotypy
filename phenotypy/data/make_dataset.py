@@ -62,7 +62,7 @@ def create_data_loaders(config):
 
 def load_single(video_path, config_path, testing=True, batch_size=8, stride=1):
 
-    config = parse_config(Path(config_path))
+    config = parse_config(Path(config_path), training=not testing)
     dataset = VideoCollection([video_path], config, name='testing')
     dataset.sample_clips(stride=stride, testing=testing)
     loader = data.DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0,
