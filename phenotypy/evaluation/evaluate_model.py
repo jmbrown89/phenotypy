@@ -22,7 +22,7 @@ def main(cv_dir, out_dir, data_dir):
     sub_dirs = sorted([d for d in cv_dir.glob('*/') if d.is_dir()])
     evaluator = MultiClassEvaluator(out_dir)
 
-    for sub_dir in sub_dirs:  # nifty way to search subdirectories
+    for sub_dir in sub_dirs:
 
         # Load model from best performing epoch
         val_results = pd.read_csv(sub_dir / 'val_results.csv', index_col=0)
@@ -63,7 +63,7 @@ def evaluate(video, model, config, csv_out, encoding, stride=28):
 
     # Passing a float for the stride ensures it treated as a proportion of the window size
     y_true, y_pred = predict(video, model, config, stride=stride, per_frame=True,
-                             save_dir=csv_out.parent, save_video=False)
+                             save_dir=csv_out.parent, save_video=True)
 
     # Chop off the remaining frames, if any
     remainder = len(y_true) % stride

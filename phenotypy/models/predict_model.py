@@ -7,9 +7,10 @@ import torch
 from collections import defaultdict
 from tqdm import tqdm
 import numpy as np
+from collections import Counter
 from phenotypy.data.make_dataset import load_single
 from phenotypy.visualization.visualize import play_video
-
+from phenotypy.visualization.plotting import Plotter
 
 @click.command()
 @click.argument('video_path', type=click.Path(exists=True))
@@ -27,6 +28,12 @@ def predict(video_path, model_path, config_path, stride=7, device='cuda', per_fr
     # Create a loader for a single video
     print(f"Loading video '{Path(video_path).stem}'")
     loader, config = load_single(video_path, config_path, testing=True, stride=stride, batch_size=1)
+
+    # Create plotter object to plot... stuff
+    plotter = Plotter(Path(save_dir) / 'plots', prefix=video_path.with_suffix('').name + '_')
+    df = loader.dataset.video_objects[0].raw_annotations
+    # plotter.plot_activity_length(df, outliers=False)
+    plotter.plot_activity_frequency(Counter(df['activity']))
 
     # Load the model for evaluation
     model = torch.load(model_path).eval()
@@ -69,12 +76,12 @@ def predict(video_path, model_path, config_path, stride=7, device='cuda', per_fr
             y_pred, y_preda = unstrided_labels_to_frames(y_preda, clip_size=clip_size)  # TODO check this works
         else:
             y_pred, y_preda = strided_labels_to_frames(y_preda, clip_size=clip_size, stride=stride)
-            y_true = np.hstack(loader.dataset.clips.loc[::4]['label'])
+            # y_true = np.hstack(loader.dataset.clips.loc[::4]['label'])
 
         if save_video:
             print("Annotating video")
             save_dir = Path(save_dir)
-            pd.DataFrame(pd.Series(y_pred, name='label')).to_csv(save_dir / 'prediction.csv')
+            # pd.DataFrame(pd.Series(y_pred, name='label')).to_csv(save_dir / 'prediction.csv')
             play_video(video_path, loader.dataset.activity_encoding, predicted_labels=y_pred,
                        save_video=save_dir / video_path.with_suffix('.mp4').name)
 

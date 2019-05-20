@@ -55,13 +55,13 @@ class MultiClassEvaluator(Evaluator):
             # Infuriating way to insert columns where there is no data
             diff = map(str, set(range(0, 8)).difference(set(y_true)))
             y_true = pd.get_dummies(y_true)
-            y_true = y_true.assign(**dict.fromkeys(diff, 0)).values
+            # y_true = y_true.assign(**dict.fromkeys(diff, 0)).values
 
         for i, label in self.encoding.items():
 
-            if all(y_true[:, i] == 0):
+            if i not in y_true.columns:
                 continue
-            fpr, tpr, area = super().auc(y_true[:, i], y_pred[:, i], method=method)
+            fpr, tpr, area = super().auc(y_true[i], y_pred[:, i], method=method)
             self.roc[label].append({'fpr': fpr, 'tpr': tpr, 'area': area})
 
             # label_str = label if 'micro' not in label else 'micro.'
