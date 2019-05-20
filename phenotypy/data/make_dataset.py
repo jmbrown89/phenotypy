@@ -75,7 +75,7 @@ def dataset_from_config(config, name='training', n_examples=5):
     data_dir, save_dir, exp_dir = Path(config['data_dir']), Path(config['out_dir']), Path(config['experiment_dir'])
     csv_file = config[f'{name}_csv']
 
-    video_list = pd.read_csv(data_dir / csv_file)['video'].apply(lambda x: data_dir / x).values
+    video_list = pd.read_csv(data_dir / csv_file)['video'].apply(lambda x: data_dir / Path(x).name).values
     logging.info(f"Found {len(video_list)} videos in '{data_dir}'")
     loader = VideoCollection(video_list, config, name=name, processed_dir=save_dir)
     loader.sample_clips(config.get('clip_stride', 1.0))
@@ -152,12 +152,13 @@ class VideoCollection(data.Dataset):
         transforms = [ToPIL()]
 
         if self.name == 'training':
-            transforms.append(RandomAffine(*self.augmentation))
+            # transforms.append(RandomAffine(*self.augmentation))
             transforms.append(RandomHorizontalFlip())
-            transforms.append(ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2))
+            # transforms.append(ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2))
 
         transforms.append(Scale((self.config['transform']['resize'], self.config['transform']['resize'])))
         transforms.append(ToTensor())
+        transforms.append(Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)))
 
         self.spatial_transform = Compose(transforms)
 

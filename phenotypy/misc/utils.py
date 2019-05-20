@@ -54,7 +54,7 @@ def parse_config(config_file, training=True):
                 exit(1)
         else:
             out_dir = Path.resolve(Path(config_file).parent / config['out_dir'])
-            out_dir.mkdir(parents=False, exist_ok=False)
+            out_dir.mkdir(parents=False, exist_ok=config['clobber'])
 
         config['out_dir'] = str(out_dir)
 
