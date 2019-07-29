@@ -31,7 +31,7 @@ def main(cv_dir, out_dir, data_dir):
 
         # Load config file and get validation video
         config_file = str(next(sub_dir.glob('*.yaml')))
-        config = yaml.load(open(config_file, 'rb').read(), Loader=yaml.SafeLoader)
+        config = yaml.load(open(config_file, 'rb').read(), Loader=yaml.Loader)
         evaluator.encoding = config['encoding']
 
         if not data_dir:
@@ -50,6 +50,7 @@ def main(cv_dir, out_dir, data_dir):
             results = evaluate(video, model, config_file, csv_out, config['encoding'])
             evaluator.auc(results['ground_truth'].values, results.iloc[:, 0:8].values, legend=video.name)
             evaluator.mean_accuracy(results['ground_truth'].values, results['prediction'])
+            evaluator.confusion(results['ground_truth'].values, results['prediction'])
 
             print("Done.")
         except ValueError as v:
@@ -63,7 +64,7 @@ def evaluate(video, model, config, csv_out, encoding, stride=28):
 
     # Passing a float for the stride ensures it treated as a proportion of the window size
     y_true, y_pred = predict(video, model, config, stride=stride, per_frame=True,
-                             save_dir=csv_out.parent, save_video=True)
+                             save_dir=csv_out.parent, save_video=False)
 
     # Chop off the remaining frames, if any
     remainder = len(y_true) % stride

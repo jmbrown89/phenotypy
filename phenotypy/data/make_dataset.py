@@ -152,13 +152,13 @@ class VideoCollection(data.Dataset):
         transforms = [ToPIL()]
 
         if self.name == 'training':
-            # transforms.append(RandomAffine(*self.augmentation))
+            transforms.append(RandomAffine(*self.augmentation))
             transforms.append(RandomHorizontalFlip())
-            # transforms.append(ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2))
+            transforms.append(ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2))
 
         transforms.append(Scale((self.config['transform']['resize'], self.config['transform']['resize'])))
         transforms.append(ToTensor())
-        transforms.append(Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)))
+        # transforms.append(Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)))
 
         self.spatial_transform = Compose(transforms)
 
@@ -219,7 +219,9 @@ class VideoCollection(data.Dataset):
         :param plotter: plotting object with which to generate plots
         """
 
-        sample_stats = Counter([sample[-1] for sample in self.clips])
+        sample_stats = Counter([sample['label'] for _, sample in self.clips.iterrows()])
+        sample_stats = {self.label_encoding[k]: v for k, v in sample_stats.items()}
+
         logging.info(f"Number of videos: {len(self.video_list)}")
         logging.info(f"Number of annotations (one or more frames): {len(self.annotations)}")
         logging.info(f"Number of unique activities: {self.no_classes}")
@@ -262,7 +264,7 @@ class Video:
 
         # Load raw video and annotations
         logging.info(f"Loading video '{video_path}'")
-        self.video, self.fps, self.channels, self.frames, self.height, self.width = load_video(video_path)
+        self.video, self.fps, self.channels, self.frames, self.height, self.width = load_video(self.video_path)
         self._load_annotations(self.video_path)
         self.cache = {}
 
@@ -337,15 +339,21 @@ class Video:
         if not res:
             return None
 
-        # TODO make this configurable
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        frame = np.pad(frame, ((8, 8), (0, 0), (0, 0)), mode='symmetric')
-
-        crop = (frame.shape[1] - frame.shape[0]) // 2
-        frame = frame[:, crop:-crop, :]
+        frame = np.pad(frame, ((30, 30), (0, 0), (0, 0)), mode='edge')
+        # crop = (frame.shape[1] - frame.shape[0]) // 2
+        frame = frame[:, 10:-10, :]
         # self.cache[idx] = frame
 
         return frame
+
+    def preview(self, no_frames=10):
+
+        start = np.random.randint(0, self.frames)
+        end = start + no_frames
+
+        frames = np.concatenate([self.get_frame(i) for i in range(start, end)], axis=1)
+        return frames
 
     def encode_labels(self, encoding=None):
         """

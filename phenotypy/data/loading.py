@@ -26,7 +26,7 @@ def load_video(video_file):
 
     frame = None
     attempts = 0
-    while not frame and attempts < 10:
+    while frame is None and attempts < 10:
         res, frame = video.read()  # BGR!!!!
         attempts += 1
 

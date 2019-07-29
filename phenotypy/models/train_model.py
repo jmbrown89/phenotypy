@@ -14,7 +14,7 @@ from ignite.handlers import ModelCheckpoint, EarlyStopping
 
 from phenotypy.data.make_dataset import parse_config, create_data_loaders
 from phenotypy.misc.utils import init_log, get_experiment_dir
-from phenotypy.models import resnet
+from phenotypy.models import resnet, densenet
 from phenotypy.visualization.plotting import Plotter
 
 
@@ -98,11 +98,13 @@ def train(config_path, experiment_name=None):
     init_log(log_file)
     logging.info('Training started')
 
-    config['experiment_dir'] = str(experiment_dir)
+    config['experiment_dir'] = experiment_dir
     train_loader, val_loader = create_data_loaders(config)
-    train_plotter = Plotter(experiment_dir, vis=config['visdom'])
-    val_plotter = Plotter(experiment_dir, vis=config['visdom'])
-    results = pd.DataFrame()
+    train_plotter = Plotter(experiment_dir / 'train_stats', vis=config['visdom'])
+    val_plotter = Plotter(experiment_dir / 'val_stats', vis=config['visdom'])
+
+    train_loader.dataset.statistics(train_plotter)
+    val_loader.dataset.statistics(val_plotter)
 
     with open(experiment_dir / Path(config_path).name, 'w') as f:
         config['encoding'] = train_loader.dataset.label_encoding
@@ -110,13 +112,14 @@ def train(config_path, experiment_name=None):
 
     logging.info("Initialising model")
     layers = config['layers']
+
     model = resnet.resnet[layers](  # https://github.com/facebook/fb.resnet.torch/blob/master/TRAINING.md#shortcuttype
         num_classes=config['no_classes'],
         sample_size=config['transform']['resize'],
         sample_duration=config['clip_length'],
         init=config.get('weights', 'xavier'))
 
-    params = resnet.get_fine_tuning_parameters(model)
+    params = model.parameters()
     solver = config.get('solver', 'sgd').lower()
 
     if 'rms' in solver:

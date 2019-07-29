@@ -42,6 +42,7 @@ class MultiClassEvaluator(Evaluator):
         super(MultiClassEvaluator, self).__init__(out_dir)
         self.encoding = encoding
         self.roc = defaultdict(list)
+        self.y_pred, self.y_true = [], []
         self.accuracy = []
         self.legends = []
 
@@ -69,8 +70,14 @@ class MultiClassEvaluator(Evaluator):
 
     def mean_accuracy(self, y_true, y_pred):
 
+        per_class_accuracy(y_true, y_pred)
         result = np.mean(per_class_accuracy(y_true, y_pred))
         self.accuracy.append(result)
+
+    def confusion(self, y_true, y_pred):
+
+        self.y_true.extend(y_true)
+        self.y_pred.extend(y_pred)
 
     def run(self):
 
@@ -80,6 +87,10 @@ class MultiClassEvaluator(Evaluator):
             print(f'{label}: {np.mean(aucs)}')
 
         self.plotter.plot_multiclass_roc(self.roc, legend=self.legends)
+
+        cm = confusion_matrix(self.y_true, self.y_pred)
+        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+        self.plotter.plot_confusion(cm, self.encoding)
 
 
 def per_class_accuracy(y_true, y_pred):

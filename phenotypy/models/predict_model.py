@@ -16,32 +16,34 @@ from phenotypy.visualization.plotting import Plotter
 @click.argument('video_path', type=click.Path(exists=True))
 @click.argument('model_path', type=click.Path(exists=True))
 @click.argument('config_path', type=click.Path(exists=True))
+@click.argument('out_dir', type=click.Path(exists=True), default=None)
 @click.argument('device', type=str, default='cuda')
-def main(video_path, model_path, config_path, device):
+def main(video_path, model_path, config_path, out_dir, device):
     """ Runs training based on the provided config file.
     """
-    predict(video_path, model_path, config_path, device=device)
+    predict(video_path, model_path, config_path, device=device, save_dir=out_dir, save_video=out_dir is not None)
 
 
 def predict(video_path, model_path, config_path, stride=7, device='cuda', per_frame=True, save_dir='./', save_video=False):
 
     # Create a loader for a single video
-    print(f"Loading video '{Path(video_path).stem}'")
-    loader, config = load_single(video_path, config_path, testing=True, stride=stride, batch_size=1)
+    video_path = Path(video_path)
+    save_dir = Path(save_dir)
+    print(f"Loading video '{video_path.stem}'")
+    loader, config = load_single(str(video_path), config_path, testing=True, stride=stride, batch_size=1)
 
     # Create plotter object to plot... stuff
-    plotter = Plotter(Path(save_dir) / 'plots', prefix=video_path.with_suffix('').name + '_')
-    df = loader.dataset.video_objects[0].raw_annotations
-    # plotter.plot_activity_length(df, outliers=False)
-    plotter.plot_activity_frequency(Counter(df['activity']))
-
-    # Load the model for evaluation
-    model = torch.load(model_path).eval()
-    model.to(device)
-    np_file = (Path(save_dir) / Path(video_path).name).with_suffix('.npz')
+    # plotter = Plotter(Path(save_dir) / 'plots', prefix=video_path.with_suffix('').name + '_')
+    # df = loader.dataset.video_objects[0].raw_annotations
+    # # plotter.plot_activity_length(df, outliers=False)
+    # plotter.plot_activity_frequency(Counter(df['activity']))
+    np_file = (save_dir / video_path.name).with_suffix('.npz')
 
     if not np_file.exists():
 
+        # Load the model for evaluation
+        model = torch.load(model_path).eval()
+        model.to(device)
         y_preda, y_true = [], []
 
         for x, y in tqdm(loader):  # TODO make this smarter so that we can restart incomplete runs
@@ -81,7 +83,7 @@ def predict(video_path, model_path, config_path, stride=7, device='cuda', per_fr
         if save_video:
             print("Annotating video")
             save_dir = Path(save_dir)
-            # pd.DataFrame(pd.Series(y_pred, name='label')).to_csv(save_dir / 'prediction.csv')
+            pd.DataFrame(pd.Series(y_pred, name='y_pred')).to_csv(save_dir / video_path.with_suffix('.csv').name)
             play_video(video_path, loader.dataset.activity_encoding, predicted_labels=y_pred,
                        save_video=save_dir / video_path.with_suffix('.mp4').name)
 

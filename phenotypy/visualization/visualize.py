@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from dotenv import find_dotenv, load_dotenv
 import cv2
+import pandas as pd
 from phenotypy.data.make_dataset import Video
 from skvideo.io import FFmpegWriter
 
@@ -17,7 +18,8 @@ line_type = 2
 
 @click.command()
 @click.argument('video_path', type=click.Path(exists=True))
-def main(video_path):
+@click.argument('annotations', type=click.Path(exists=True))
+def main(video_path, annotations=None):
     """ Runs data processing scripts to turn raw data from (../raw) into
         cleaned data ready to be analyzed (saved in ../processed).
     """
@@ -25,7 +27,8 @@ def main(video_path):
     logger.info('Playing video')
 
     video_path = Path(video_path)
-    play_video(video_path)
+    predicted_labels = pd.read_csv(annotations, index_col=0)['y_pred'] if annotations else None
+    play_video(video_path, predicted_labels=predicted_labels)
 
 
 def play_video(video_path, activity_encoding=None, predicted_labels=None, save_video=None):

@@ -68,9 +68,18 @@ class Plotter:
         except AttributeError:
             pass
 
-    def plot_confusion(self):
+    def plot_confusion(self, cm, encoding):
 
-        pass
+        _, ax = plt.subplots()
+
+        encoding = [v if 'micro' not in v else 'micro.' for v in encoding.values()]
+        df = pd.DataFrame(cm, columns=encoding, index=encoding)
+        sns.heatmap(df, ax=ax, annot=True, fmt='.2f', vmin=0., vmax=1., cmap='viridis')
+        plt.title('Normalized confusion matrix')
+        plt.xlabel('Predicted label')
+        plt.ylabel('True label')
+        self.savefig('confusion')
+        self.savefig('confusion')
 
     def plot_multiclass_roc(self, data, legend=None):
 
@@ -98,7 +107,7 @@ class Plotter:
     def plot_activity_length_distribution(self, lengths, activity):
 
         fig, ax = plt.subplots()
-        sns.distplot(lengths[lengths <= 100.], ax=ax, hist_kws=dict(cumulative=True), kde_kws=dict(cumulative=True))
+        sns.distplot(lengths[lengths <= 100.], ax=ax, hist_kws=dict(cumulative=True), kde=False)
         self.savefig(activity)
 
     def plot_activity_frequency(self, count_object):

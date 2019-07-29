@@ -37,7 +37,7 @@ def increment_path(directory, name_pattern):
 def parse_config(config_file, training=True):
 
     f = open(config_file, 'rb').read()
-    config = yaml.load(f, Loader=yaml.SafeLoader)
+    config = yaml.load(f, Loader=yaml.Loader)
 
     if training:
 
